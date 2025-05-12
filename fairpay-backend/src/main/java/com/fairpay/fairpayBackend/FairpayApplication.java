@@ -1,4 +1,4 @@
-package com.fairpay.fairpay_backend;
+package com.fairpay.fairpayBackend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
