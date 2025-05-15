@@ -1,4 +1,4 @@
-package com.fairpay.fairpay_backend;
+package com.fairpay.fairpayBackend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

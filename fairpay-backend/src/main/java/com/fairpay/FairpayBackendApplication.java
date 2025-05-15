@@ -1,13 +1,13 @@
-package com.fairpay.fairpayBackend;
+package com.fairpay;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class FairpayApplication {
+public class FairpayBackendApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(FairpayApplication.class, args);
+		SpringApplication.run(FairpayBackendApplication.class, args);
                 System.out.println("ola mundo");
 	}
 
