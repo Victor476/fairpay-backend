@@ -1,6 +1,8 @@
-package com.fairpay.User;
+package com.fairpay;
 
-import com.fairpay.User.dto.RegisterRequestDTO;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.service.AuthService;
+import com.fairpay.dto.RegisterRequestDTO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;

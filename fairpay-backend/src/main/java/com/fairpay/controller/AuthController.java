@@ -1,6 +1,7 @@
-package com.fairpay.User;
+package com.fairpay.controller;
 
-import com.fairpay.User.dto.RegisterRequestDTO;
+import com.fairpay.service.AuthService;
+import com.fairpay.dto.RegisterRequestDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;

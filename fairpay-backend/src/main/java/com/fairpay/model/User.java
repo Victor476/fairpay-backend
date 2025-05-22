@@ -2,7 +2,7 @@
  * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
  * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.User to edit this template
  */
-package com.fairpay.User;
+package com.fairpay.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

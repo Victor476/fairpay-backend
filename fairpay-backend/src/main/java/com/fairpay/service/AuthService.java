@@ -2,9 +2,11 @@
  * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
  * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
  */
-package com.fairpay.User;
+package com.fairpay.service;
 
-import com.fairpay.User.dto.RegisterRequestDTO;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.model.User;
+import com.fairpay.dto.RegisterRequestDTO;
 import java.time.LocalDateTime;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
