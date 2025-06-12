@@ -1,7 +1,3 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.fairpay.service;
 
 import com.fairpay.repository.UserRepository;
@@ -28,22 +24,19 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    public void register(RegisterRequestDTO request) {
+    public User register(RegisterRequestDTO request) {
         if (!request.getPassword().equals(request.getConfirmPassword())) {
-            throw new RuntimeException("Senhas não coincidem.");
+            throw new IllegalArgumentException("As senhas não coincidem");
         }
 
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("E-mail já está em uso.");
-        }
-
+        // Criar novo usuário
         User user = new User();
         user.setName(request.getName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setCreatedAt(LocalDateTime.now());
 
-        userRepository.save(user);
+        // Salvar usuário no banco de dados
+        return userRepository.save(user);
     }
 }
-
