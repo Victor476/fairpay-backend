@@ -3032,3 +3032,7562 @@ Para testar esta funcionalidade, você pode:
 Este é um exemplo completo da implementação da funcionalidade de link de convite para grupos no sistema FairPay. Você pode adaptar o código conforme necessário para seu projeto específico.
 
 Código semelhante encontrado com 2 tipos de licença
+
+Victor476: esse arquivo tem as nossas conversas em outra maquina mostre de dono como implementar aquela issue
+
+Workspace: Coletando informações do workspace
+
+# Implementação da Funcionalidade de Link de Convite para Grupos
+
+Com base nas suas conversas anteriores, vou mostrar como implementar a funcionalidade de link de convite para grupos no seu projeto Spring Boot. Esta funcionalidade permitirá que um administrador gere um link de convite para compartilhar com outras pessoas, que poderão usá-lo para entrar no grupo.
+
+## 1. Criar a Entidade GroupInviteLink
+
+```java
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Entity
+@Data
+@Table(name = "group_invite_links")
+public class GroupInviteLink {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, unique = true)
+    private String token;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id", nullable = false)
+    private Group group;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_id", nullable = false)
+    private User createdBy;
+    
+    @Column(nullable = false)
+    private LocalDateTime createdAt;
+    
+    @Column(nullable = false)
+    private LocalDateTime expiresAt;
+    
+    @Column
+    private LocalDateTime usedAt;
+    
+    @Column
+    private Boolean isActive = true;
+}
+```
+
+## 2. Criar o Repository para o Link de Convite
+
+```java
+package com.fairpay.repository;
+
+import com.fairpay.model.GroupInviteLink;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface GroupInviteLinkRepository extends JpaRepository<GroupInviteLink, Long> {
+    
+    Optional<GroupInviteLink> findByToken(String token);
+    
+    boolean existsByTokenAndIsActiveTrue(String token);
+}
+```
+
+## 3. Criar DTOs para Requisição e Resposta
+
+```java
+package com.fairpay.dto;
+
+import lombok.Data;
+
+@Data
+public class GroupInviteLinkRequestDTO {
+    private Integer expiresInDays = 7; // Valor padrão: 7 dias
+}
+```
+
+```java
+package com.fairpay.dto;
+
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Data
+public class GroupInviteLinkResponseDTO {
+    private String inviteLink;
+    private LocalDateTime expiresAt;
+}
+```
+
+```java
+package com.fairpay.dto;
+
+import lombok.Data;
+
+@Data
+public class GroupJoinResponseDTO {
+    private String message;
+    private GroupResponseDTO group;
+}
+```
+
+## 4. Criar o Service para Gerenciar Links de Convite
+
+```java
+package com.fairpay.service;
+
+import com.fairpay.dto.GroupInviteLinkRequestDTO;
+import com.fairpay.dto.GroupInviteLinkResponseDTO;
+import com.fairpay.dto.GroupJoinResponseDTO;
+import com.fairpay.dto.GroupResponseDTO;
+import com.fairpay.model.Group;
+import com.fairpay.model.GroupInviteLink;
+import com.fairpay.model.User;
+import com.fairpay.repository.GroupInviteLinkRepository;
+import com.fairpay.repository.GroupRepository;
+import com.fairpay.repository.UserRepository;
+import jakarta.persistence.EntityNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Service
+public class GroupInviteLinkService {
+    
+    @Value("${app.baseUrl:http://localhost:8080}")
+    private String baseUrl;
+    
+    @Autowired
+    private GroupRepository groupRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private GroupInviteLinkRepository inviteLinkRepository;
+    
+    /**
+     * Gera um link de convite para um grupo
+     */
+    @Transactional
+    public GroupInviteLinkResponseDTO generateInviteLink(Long groupId, Long userId, GroupInviteLinkRequestDTO requestDTO) {
+        // Verificar se o grupo existe
+        Group group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new EntityNotFoundException("Grupo não encontrado"));
+        
+        // Verificar se o usuário existe
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado"));
+        
+        // Verificar se o usuário é administrador do grupo
+        if (!group.getCreatedBy().getId().equals(userId)) {
+            throw new IllegalArgumentException("Apenas o criador do grupo pode gerar links de convite");
+        }
+        
+        // Gerar token único
+        String token = UUID.randomUUID().toString();
+        
+        // Criar entidade GroupInviteLink
+        GroupInviteLink inviteLink = new GroupInviteLink();
+        inviteLink.setToken(token);
+        inviteLink.setGroup(group);
+        inviteLink.setCreatedBy(user);
+        inviteLink.setCreatedAt(LocalDateTime.now());
+        
+        // Definir data de expiração
+        int expiresInDays = requestDTO.getExpiresInDays() != null ? 
+                requestDTO.getExpiresInDays() : 7;
+        inviteLink.setExpiresAt(LocalDateTime.now().plusDays(expiresInDays));
+        
+        // Salvar no banco
+        GroupInviteLink savedLink = inviteLinkRepository.save(inviteLink);
+        
+        // Montar resposta
+        GroupInviteLinkResponseDTO responseDTO = new GroupInviteLinkResponseDTO();
+        responseDTO.setInviteLink(baseUrl + "/api/groups/join/" + savedLink.getToken());
+        responseDTO.setExpiresAt(savedLink.getExpiresAt());
+        
+        return responseDTO;
+    }
+    
+    /**
+     * Processa a aceitação de um convite de grupo
+     */
+    @Transactional
+    public GroupJoinResponseDTO processJoinRequest(String token, Long userId) {
+        // Verificar se o token existe e está ativo
+        GroupInviteLink inviteLink = inviteLinkRepository.findByToken(token)
+                .orElseThrow(() -> new EntityNotFoundException("Link de convite inválido"));
+        
+        // Verificar se o link expirou
+        if (inviteLink.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new IllegalStateException("Link de convite expirado");
+        }
+        
+        // Verificar se o link está ativo
+        if (!inviteLink.getIsActive()) {
+            throw new IllegalStateException("Link de convite desativado");
+        }
+        
+        // Verificar se o usuário existe
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("Usuário não encontrado"));
+        
+        // Obter o grupo
+        Group group = inviteLink.getGroup();
+        
+        // Verificar se o usuário já é membro
+        if (group.getMembers().contains(user)) {
+            throw new IllegalStateException("Você já é membro deste grupo");
+        }
+        
+        // Adicionar usuário ao grupo
+        group.getMembers().add(user);
+        groupRepository.save(group);
+        
+        // Marcar o link como usado (opcional)
+        inviteLink.setUsedAt(LocalDateTime.now());
+        inviteLinkRepository.save(inviteLink);
+        
+        // Preparar resposta
+        GroupJoinResponseDTO responseDTO = new GroupJoinResponseDTO();
+        responseDTO.setMessage("Você entrou com sucesso no grupo '" + group.getName() + "'");
+        
+        GroupResponseDTO groupDTO = new GroupResponseDTO();
+        groupDTO.setId(group.getId());
+        groupDTO.setName(group.getName());
+        groupDTO.setDescription(group.getDescription());
+        responseDTO.setGroup(groupDTO);
+        
+        return responseDTO;
+    }
+}
+```
+
+## 5. Adicionar Endpoints no Controller
+
+```java
+package com.fairpay.controller;
+
+import com.fairpay.dto.GroupInviteLinkRequestDTO;
+import com.fairpay.dto.GroupInviteLinkResponseDTO;
+import com.fairpay.dto.GroupJoinResponseDTO;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.service.GroupInviteLinkService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/groups")
+public class GroupInviteController {
+    
+    @Autowired
+    private GroupInviteLinkService inviteLinkService;
+    
+    /**
+     * Endpoint para gerar link de convite
+     */
+    @PostMapping("/{groupId}/invite-link")
+    public ResponseEntity<GroupInviteLinkResponseDTO> generateInviteLink(
+            @PathVariable Long groupId,
+            @RequestBody(required = false) GroupInviteLinkRequestDTO requestDTO,
+            @AuthenticationPrincipal AuthenticatedUser currentUser) {
+        
+        // Verificar se request é nulo - criar um novo se for
+        if (requestDTO == null) {
+            requestDTO = new GroupInviteLinkRequestDTO();
+        }
+        
+        GroupInviteLinkResponseDTO responseDTO = inviteLinkService.generateInviteLink(
+                groupId, currentUser.getId(), requestDTO);
+        
+        return ResponseEntity.ok(responseDTO);
+    }
+    
+    /**
+     * Endpoint para aceitar convite e entrar no grupo
+     */
+    @GetMapping("/join/{token}")
+    public ResponseEntity<GroupJoinResponseDTO> joinGroup(
+            @PathVariable String token,
+            @AuthenticationPrincipal AuthenticatedUser currentUser) {
+        
+        try {
+            GroupJoinResponseDTO responseDTO = inviteLinkService.processJoinRequest(
+                    token, currentUser.getId());
+            return ResponseEntity.ok(responseDTO);
+        } catch (IllegalStateException e) {
+            // Para erros de estado (link expirado, já membro, etc.)
+            return ResponseEntity.badRequest().body(null);
+        } catch (EntityNotFoundException e) {
+            // Para quando o link não existe
+            return ResponseEntity.notFound().build();
+        }
+    }
+}
+```
+
+## 6. Configurar o Tratamento de Exceções
+
+```java
+package com.fairpay.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+
+import jakarta.persistence.EntityNotFoundException;
+import java.time.LocalDateTime;
+
+@ControllerAdvice
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(EntityNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleEntityNotFoundException(EntityNotFoundException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+    
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+    
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalStateException(IllegalStateException ex) {
+        ErrorResponse error = new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                ex.getMessage(),
+                LocalDateTime.now()
+        );
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+    
+    // Classe interna para representar a resposta de erro
+    public static class ErrorResponse {
+        private int status;
+        private String message;
+        private LocalDateTime timestamp;
+        
+        public ErrorResponse(int status, String message, LocalDateTime timestamp) {
+            this.status = status;
+            this.message = message;
+            this.timestamp = timestamp;
+        }
+        
+        // Getters e setters
+        public int getStatus() {
+            return status;
+        }
+        
+        public String getMessage() {
+            return message;
+        }
+        
+        public LocalDateTime getTimestamp() {
+            return timestamp;
+        }
+    }
+}
+```
+
+## 7. Adicionar a Propriedade na Configuração do Aplicativo
+
+No arquivo `application.properties` ou `application.yml`, adicione:
+
+```properties
+# URL base para links de convite
+app.baseUrl=http://localhost:8080
+```
+
+## 8. Modificações Necessárias na Entidade Group
+
+Se ainda não existir, certifique-se de que a classe `Group` tenha um campo para membros:
+
+```java
+// Adicione isso à classe Group existente
+@ManyToMany
+@JoinTable(
+    name = "group_members",
+    joinColumns = @JoinColumn(name = "group_id"),
+    inverseJoinColumns = @JoinColumn(name = "user_id")
+)
+private Set<User> members = new HashSet<>();
+
+// Métodos para gerenciar membros
+public void addMember(User user) {
+    members.add(user);
+}
+
+public boolean isMember(User user) {
+    return members.contains(user);
+}
+
+// Getters e setters
+public Set<User> getMembers() {
+    return members;
+}
+
+public void setMembers(Set<User> members) {
+    this.members = members;
+}
+```
+
+## Como testar
+
+Para testar esta funcionalidade:
+
+1. **Criar um grupo**:
+   - `POST /api/groups`
+   - Body: `{"name": "Viagem para o Rio", "description": "Despesas da viagem"}`
+
+2. **Gerar um link de convite**:
+   - `POST /api/groups/1/invite-link`
+   - Body: `{"expiresInDays": 7}`
+
+3. **Usar o link para entrar no grupo** (como outro usuário):
+   - `GET /api/groups/join/{token}` (use o token da resposta anterior)
+
+Este código completo implementa a funcionalidade de convite por link conforme discutido nas conversas anteriores.
+
+Código semelhante encontrado com 2 tipos de licença
+
+Victor476: eu vou ter que ter a autenticação implementada pra fazer isso ou da pra fazer sem autenticação como estar agora?
+
+GitHub Copilot: Para implementar a funcionalidade de link de convite para grupos, você não necessariamente precisa ter a autenticação completa implementada, mas existem algumas considerações importantes:
+
+## Opções para implementação:
+
+### 1. Implementação sem autenticação (solução temporária)
+
+Se você quiser desenvolver essa funcionalidade sem ter a autenticação completa, pode fazer o seguinte:
+
+- Ao gerar o link de convite, você precisará receber o `userId` através do corpo da requisição (já que não teria como obtê-lo da autenticação)
+- Para usar o link de convite, também precisaria receber o `userId` do usuário que está tentando entrar no grupo
+
+```java
+// No controller (versão sem autenticação)
+@PostMapping("/{groupId}/invite-link")
+public ResponseEntity<GroupInviteLinkResponseDTO> generateInviteLink(
+        @PathVariable Long groupId,
+        @RequestBody GroupInviteLinkRequestDTO requestDTO) {
+    
+    // Usando o userId passado no corpo da requisição
+    Long userId = requestDTO.getUserId(); // Adicione este campo ao DTO
+    
+    GroupInviteLinkResponseDTO responseDTO = inviteLinkService.generateInviteLink(
+            groupId, userId, requestDTO);
+    
+    return ResponseEntity.ok(responseDTO);
+}
+
+@PostMapping("/join/{token}")
+public ResponseEntity<GroupJoinResponseDTO> joinGroup(
+        @PathVariable String token,
+        @RequestBody Map<String, Long> request) {
+    
+    Long userId = request.get("userId");
+    
+    GroupJoinResponseDTO responseDTO = inviteLinkService.processJoinRequest(
+            token, userId);
+    return ResponseEntity.ok(responseDTO);
+}
+```
+
+### 2. Implementação com mock de autenticação
+
+Você pode criar um filtro temporário que simula a autenticação:
+
+```java
+@Component
+public class DevelopmentAuthenticationFilter extends OncePerRequestFilter {
+    
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        
+        // Verifica se tem um header de desenvolvimento com userId
+        String userIdStr = request.getHeader("X-Dev-User-Id");
+        if (userIdStr != null && !userIdStr.isEmpty()) {
+            Long userId = Long.parseLong(userIdStr);
+            
+            // Cria um AuthenticatedUser temporário
+            AuthenticatedUser user = new AuthenticatedUser(userId, "dev@example.com", Collections.emptyList());
+            
+            // Cria uma autenticação e a coloca no contexto
+            UsernamePasswordAuthenticationToken authentication = 
+                new UsernamePasswordAuthenticationToken(user, null, Collections.emptyList());
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        }
+        
+        chain.doFilter(request, response);
+    }
+}
+```
+
+## Considerações importantes
+
+1. **Segurança**: Implementar sem autenticação é arriscado em ambiente de produção
+2. **Consistência de dados**: Sem autenticação, você pode ter problemas de validação e segurança
+3. **Abordagem recomendada**: Implementar pelo menos uma autenticação básica antes
+
+## Conclusão
+
+É tecnicamente possível implementar a funcionalidade de convite sem ter toda a autenticação implementada, mas:
+
+- Use isso apenas para desenvolvimento e testes
+- Implemente alguma forma de autenticação, mesmo que temporária, antes de ir para produção
+- Refatore o código assim que tiver a autenticação real implementada
+
+Se você está construindo a aplicação do zero, seria mais prudente implementar primeiro a autenticação básica e depois adicionar essa funcionalidade, pois ela depende fortemente de saber qual usuário está executando as ações (gerando o link ou entrando no grupo).
+
+Para desenvolvimento rápido, você pode usar a abordagem com mock de autenticação e depois fazer a transição para a autenticação real quando estiver pronta.
+
+Victor476: pensando bem vamos implementar essa issue aqui primeiro
+
+🧩 História de Usuário (Backend) — Autenticar usuário e gerar JWT
+Como um(a)
+usuário cadastrado na plataforma,
+
+Eu quero
+autenticar minhas credenciais e receber tokens JWT,
+
+Para que
+eu possa acessar a aplicação com segurança e manter sessões autenticadas.
+
+✅ Critérios de Aceitação
+
+A API deve expor um endpoint POST /api/auth/login para autenticação.
+
+O endpoint deve receber email e senha no corpo da requisição.
+
+O backend deve:
+Validar se o usuário existe.
+Verificar se a senha está correta (criptografada com BCrypt ou similar).
+Gerar e retornar um access token JWT e um refresh token.
+
+O token JWT deve conter as claims mínimas necessárias (ex: sub, email, exp, etc.).
+
+O refresh token deve ser persistido (em memória, banco de dados ou outro mecanismo).
+
+Em caso de falha, retornar mensagens adequadas:
+401 para credenciais inválidas.
+404 para conta não encontrada.
+500 para erro interno.
+📦 Estrutura da Requisição
+Endpoint: POST /api/auth/login
+
+Body:
+
+{
+  "email": "usuario@email.com",
+  "password": "senhaSegura123"
+}
+
+### Resposta esperada:
+
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR...",
+  "refreshToken": "f0a12a8c-7fae-4e3b-b1..."
+}
+
+###⚙️ Considerações Técnicas
+- Utilizar Spring Security para autenticação.
+
+- Utilizar JWT (ex: io.jsonwebtoken.Jwts ou jjwt).
+
+- As senhas devem ser armazenadas com hashing seguro (ex: BCryptPasswordEncoder).
+
+- O tempo de expiração do accessToken deve ser curto (ex: 15 min).
+
+- O refreshToken pode ter expiração maior (ex: 1 dias).
+
+- 🏷️ Tags
+`backend`, `auth`, `JWT`, `login`, `segurança`
+
+GitHub Copilot: # Implementação da Autenticação JWT
+
+Vamos implementar a autenticação de usuários com JWT conforme solicitado. Vou mostrar o passo-a-passo para criar toda a estrutura necessária.
+
+## 1. Adicionar dependências no 
+
+pom.xml
+
+
+
+Primeiro, precisamos adicionar as dependências necessárias:
+
+```xml
+<dependencies>
+    <!-- ... outras dependências existentes ... -->
+    
+    <!-- Spring Security -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    
+    <!-- JWT -->
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-api</artifactId>
+        <version>0.11.5</version>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-impl</artifactId>
+        <version>0.11.5</version>
+        <scope>runtime</scope>
+    </dependency>
+    <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-jackson</artifactId>
+        <version>0.11.5</version>
+        <scope>runtime</scope>
+    </dependency>
+</dependencies>
+```
+
+## 2. Configurar propriedades JWT
+
+Adicionar configurações no application.properties:
+
+```properties
+// filepath: src/main/resources/application.properties
+# JWT Configuration
+app.jwt.secret=chaveSecretaParaAssinaturaDoTokenDeve256BitPeloMenos
+app.jwt.expiration=900000
+app.jwt.refresh-expiration=86400000
+```
+
+## 3. Criar classe AuthenticatedUser para usuário autenticado
+
+```java
+/java/com/fairpay/security/AuthenticatedUser.java
+package com.fairpay.security;
+
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class AuthenticatedUser implements UserDetails {
+    
+    private Long id;
+    private String email;
+    private String password;
+    private Collection<? extends GrantedAuthority> authorities;
+
+    public AuthenticatedUser(Long id, String email, String password, List<String> roles) {
+        this.id = id;
+        this.email = email;
+        this.password = password;
+        this.authorities = roles.stream()
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toList());
+    }
+
+    public AuthenticatedUser(Long id, String email, Collection<? extends GrantedAuthority> authorities) {
+        this.id = id;
+        this.email = email;
+        this.authorities = authorities;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return authorities;
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return email;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+}
+```
+
+## 4. Criar modelo para RefreshToken
+
+```java
+// filepath: src/main/java/com/fairpay/model/RefreshToken.java
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "refresh_tokens")
+@Data
+public class RefreshToken {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String token;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Column(nullable = false)
+    private Instant expiryDate;
+}
+```
+
+## 5. Criar DTOs para autenticação
+
+```java
+package com.fairpay.dto;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class LoginRequestDTO {
+    
+    @NotBlank(message = "Email não pode ser vazio")
+    @Email(message = "Email deve ser válido")
+    private String email;
+
+    @NotBlank(message = "Senha não pode ser vazia")
+    private String password;
+}
+```
+
+```java
+package com.fairpay.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@AllArgsConstructor
+@Builder
+public class TokenResponseDTO {
+    
+    private String accessToken;
+    private String refreshToken;
+}
+```
+
+```java
+package com.fairpay.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class RefreshTokenRequestDTO {
+    
+    @NotBlank
+    private String refreshToken;
+}
+```
+
+## 6. Criar Repository para RefreshToken
+
+```java
+package com.fairpay.repository;
+
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    
+    Optional<RefreshToken> findByToken(String token);
+    
+    @Modifying
+    int deleteByUser(User user);
+}
+```
+
+## 7. Implementar serviço JWT
+
+```java
+/main/java/com/fairpay/security/JwtUtils.java
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtUtils {
+    private static final Logger logger = LoggerFactory.getLogger(JwtUtils.class);
+
+    @Value("${app.jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${app.jwt.expiration}")
+    private int jwtExpirationMs;
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        return Jwts.builder()
+                .setSubject(userPrincipal.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userPrincipal.getId())
+                .compact();
+    }
+    
+    public String generateJwtToken(AuthenticatedUser user) {
+        return Jwts.builder()
+                .setSubject(user.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", user.getId())
+                .compact();
+    }
+
+    private Key key() {
+        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parserBuilder().setSigningKey(key()).build().parseClaimsJws(authToken);
+            return true;
+        } catch (MalformedJwtException e) {
+            logger.error("Token JWT inválido: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("Token JWT expirado: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("Token JWT não suportado: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("String de claim JWT vazia: {}", e.getMessage());
+        }
+
+        return false;
+    }
+}
+```
+
+## 8. Implementar serviço para RefreshToken
+
+```java
+// filepath: src/main/java/com/fairpay/service/RefreshTokenService.java
+package com.fairpay.service;
+
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class RefreshTokenService {
+    
+    @Value("${app.jwt.refresh-expiration}")
+    private Long refreshTokenDurationMs;
+
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    public Optional<RefreshToken> findByToken(String token) {
+        return refreshTokenRepository.findByToken(token);
+    }
+
+    public RefreshToken createRefreshToken(Long userId) {
+        // Verifica se o usuário já possui um refresh token e o deleta
+        userRepository.findById(userId).ifPresent(user -> {
+            refreshTokenRepository.deleteByUser(user);
+        });
+
+        RefreshToken refreshToken = new RefreshToken();
+        
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+
+        refreshToken.setUser(user);
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
+        refreshToken.setToken(UUID.randomUUID().toString());
+
+        refreshToken = refreshTokenRepository.save(refreshToken);
+        return refreshToken;
+    }
+
+    public RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            refreshTokenRepository.delete(token);
+            throw new TokenRefreshException(token.getToken(), 
+                "Refresh token expirado. Faça login novamente");
+        }
+
+        return token;
+    }
+
+    @Transactional
+    public void deleteByUserId(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+                
+        refreshTokenRepository.deleteByUser(user);
+    }
+}
+```
+
+## 9. Criar exceção para Refresh Token
+
+```java
+package com.fairpay.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(HttpStatus.FORBIDDEN)
+public class TokenRefreshException extends RuntimeException {
+    
+    private static final long serialVersionUID = 1L;
+
+    public TokenRefreshException(String token, String message) {
+        super(String.format("Falha para [%s]: %s", token, message));
+    }
+}
+```
+
+## 10. Implementar serviço de autenticação
+
+```java
+main/java/com/fairpay/service/AuthService.java
+package com.fairpay.service;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.security.JwtUtils;
+import jakarta.persistence.EntityNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+@Service
+public class AuthService {
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @Autowired
+    private JwtUtils jwtUtils;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    public TokenResponseDTO authenticateUser(LoginRequestDTO loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+
+        String jwt = jwtUtils.generateJwtToken(authentication);
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+        return TokenResponseDTO.builder()
+                .accessToken(jwt)
+                .refreshToken(refreshToken.getToken())
+                .build();
+    }
+
+    public TokenResponseDTO refreshToken(String refreshToken) {
+        return refreshTokenService.findByToken(refreshToken)
+                .map(refreshTokenService::verifyExpiration)
+                .map(RefreshToken::getUser)
+                .map(user -> {
+                    List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                    // Adicione roles se necessário
+                    
+                    AuthenticatedUser userDetails = new AuthenticatedUser(
+                            user.getId(),
+                            user.getEmail(),
+                            Collections.unmodifiableList(authorities)
+                    );
+                    
+                    String accessToken = jwtUtils.generateJwtToken(userDetails);
+                    
+                    return TokenResponseDTO.builder()
+                            .accessToken(accessToken)
+                            .refreshToken(refreshToken)
+                            .build();
+                })
+                .orElseThrow(() -> new TokenRefreshException(refreshToken,
+                        "Refresh token não encontrado na base de dados!"));
+    }
+    
+    public void logout(Long userId) {
+        refreshTokenService.deleteByUserId(userId);
+    }
+}
+```
+
+## 11. Implementar UserDetailsService personalizado
+
+```java
+package com.fairpay.security;
+
+import com.fairpay.model.User;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    @Override
+    @Transactional
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado com email: " + email));
+
+        return new AuthenticatedUser(
+                user.getId(),
+                user.getEmail(),
+                user.getPassword(),
+                new ArrayList<>() // Roles podem ser adicionadas aqui se necessário
+        );
+    }
+}
+```
+
+## 12. Implementar filtro JWT para autenticação
+
+```java
+package com.fairpay.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+public class AuthTokenFilter extends OncePerRequestFilter {
+    
+    @Autowired
+    private JwtUtils jwtUtils;
+
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        try {
+            String jwt = parseJwt(request);
+            if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+                String username = jwtUtils.getUserNameFromJwtToken(jwt);
+
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication = 
+                    new UsernamePasswordAuthenticationToken(
+                        userDetails,
+                        null,
+                        userDetails.getAuthorities());
+                
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);
+        }
+
+        return null;
+    }
+}
+```
+
+## 13. Configurar WebSecurity
+
+```java
+// filepath: src/main/java/com/fairpay/security/WebSecurityConfig.java
+package com.fairpay.security;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class WebSecurityConfig {
+    
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+
+    @Autowired
+    private AuthEntryPointJwt unauthorizedHandler;
+
+    @Bean
+    public AuthTokenFilter authenticationJwtTokenFilter() {
+        return new AuthTokenFilter();
+    }
+
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        
+        return authProvider;
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http.csrf(csrf -> csrf.disable())
+            .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> 
+                auth.requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers("/api/public/**").permitAll()
+                    .anyRequest().authenticated()
+            );
+        
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+        
+        return http.build();
+    }
+}
+```
+
+## 14. Criar AuthEntryPoint para lidar com erros de autenticação
+
+```java
+// filepath: src/main/java/com/fairpay/security/AuthEntryPointJwt.java
+package com.fairpay.security;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class AuthEntryPointJwt implements AuthenticationEntryPoint {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthEntryPointJwt.class);
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException)
+            throws IOException, ServletException {
+        logger.error("Erro de autenticação: {}", authException.getMessage());
+
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+
+        final Map<String, Object> body = new HashMap<>();
+        body.put("status", HttpServletResponse.SC_UNAUTHORIZED);
+        body.put("error", "Não autorizado");
+        body.put("message", authException.getMessage());
+        body.put("path", request.getRequestURI());
+
+        final ObjectMapper mapper = new ObjectMapper();
+        mapper.writeValue(response.getOutputStream(), body);
+    }
+}
+```
+
+## 15. Implementar o Controller de autenticação
+
+```java
+/main/java/com/fairpay/controller/AuthController.java
+package com.fairpay.controller;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RefreshTokenRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.service.AuthService;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+    
+    @Autowired
+    private AuthService authService;
+
+    @PostMapping("/login")
+    public ResponseEntity<TokenResponseDTO> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        TokenResponseDTO tokenResponse = authService.authenticateUser(loginRequest);
+        return ResponseEntity.ok(tokenResponse);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        try {
+            TokenResponseDTO response = authService.refreshToken(request.getRefreshToken());
+            return ResponseEntity.ok(response);
+        } catch (TokenRefreshException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logoutUser(@AuthenticationPrincipal AuthenticatedUser user) {
+        authService.logout(user.getId());
+        return ResponseEntity.ok().body("Logout realizado com sucesso!");
+    }
+}
+```
+
+## 16. Executar script para modificar a tabela de usuários (se necessário)
+
+Se a tabela de usuários não tiver um campo para armazenar senhas criptografadas, é necessário adicionar:
+
+```sql
+-- Executar esse script se necessário
+ALTER TABLE users ADD COLUMN password VARCHAR(255) NOT NULL DEFAULT '$2a$10$VJr5.qqQ8DmHPAYQVos5YuqXJ2VEPNA7uCBpOO5qz2dKOBWqA2Fqq';
+```
+
+## Como testar:
+
+1. Crie um usuário com senha criptografada:
+
+```java
+// No construtor ou método @PostConstruct de alguma classe @Component
+User user = new User();
+user.setEmail("test@example.com");
+user.setPassword(passwordEncoder.encode("password"));
+userRepository.save(user);
+```
+
+2. Use o Postman ou outra ferramenta para testar os endpoints:
+
+**Login:**
+```
+POST /api/auth/login
+{
+  "email": "test@example.com",
+  "password": "password"
+}
+```
+
+**Refresh Token:**
+```
+POST /api/auth/refresh
+{
+  "refreshToken": "token-recebido-no-login"
+}
+```
+
+**Logout:**
+```
+POST /api/auth/logout
+Authorization: Bearer seu-access-token
+```
+
+Esta implementação completa atende a todos os requisitos da história de usuário. Inclui autenticação, geração de tokens JWT, refresh tokens, criptografia de senha com BCrypt e tratamento adequado de erros.
+
+Código semelhante encontrado com 7 tipos de licença
+
+Victor476: realmente não da pra fazer só com as dependencias que temos agora?
+
+GitHub Copilot: # Implementação de JWT com Dependências Existentes
+
+Analisando seu 
+
+pom.xml
+
+, vejo que você já possui a dependência `spring-boot-starter-oauth2-resource-server`, que pode ser usada para implementar autenticação JWT sem precisar adicionar a biblioteca `jjwt` explicitamente. Podemos aproveitar as ferramentas que o Spring Security já oferece com as dependências atuais.
+
+Vamos refazer a implementação usando o que você já tem:
+
+## 1. Atualizar o modelo User para incluir o campo senha
+
+```java
+
+
+package com.fairpay.model;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import java.time.LocalDateTime;
+import lombok.Data;
+
+@Entity
+@Table(name = "users")
+@Data
+public class User {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false)
+    private String name;
+    
+    @Column(nullable = false, unique = true)
+    private String email;
+    
+    @Column(nullable = false)
+    private String password;
+    
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+    
+    // ... outros campos existentes
+}
+```
+
+## 2. Configurar propriedades do JWT no application.properties
+
+```properties
+// filepath: /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/resources/application.properties
+# JWT Configuration
+jwt.secret=sua-chave-secreta-de-pelo-menos-256-bits-para-hs256-deve-ser-maior-que-isso-para-seguranca-adequada
+jwt.expiration=900000
+jwt.refreshExpiration=86400000
+```
+
+## 3. Criar classe de configuração JWT para gerar e validar tokens
+
+```java
+
+
+package com.fairpay.security;
+
+import java.security.Key;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.stereotype.Component;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+
+@Component
+public class JwtTokenProvider {
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private long jwtExpirationMs;
+
+    @Value("${jwt.refreshExpiration}")
+    private long refreshExpirationMs;
+
+    public String generateAccessToken(UserDetails userDetails, Long userId) {
+        Instant now = Instant.now();
+        
+        return Jwts.builder()
+                .subject(userDetails.getUsername())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusMillis(jwtExpirationMs)))
+                .claim("userId", userId)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public String generateRefreshToken(UserDetails userDetails, Long userId) {
+        Instant now = Instant.now();
+        
+        return Jwts.builder()
+                .subject(userDetails.getUsername())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusMillis(refreshExpirationMs)))
+                .claim("userId", userId)
+                .claim("isRefreshToken", true)
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public String getUsernameFromToken(String token) {
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getSubject();
+    }
+    
+    public Long getUserIdFromToken(String token) {
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("userId", Long.class);
+    }
+
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(token);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    private Key getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+}
+```
+
+## 4. Criar modelo RefreshToken para armazenar tokens de atualização
+
+```java
+
+
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "refresh_tokens")
+@Data
+public class RefreshToken {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String token;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Column(nullable = false)
+    private Instant expiryDate;
+}
+```
+
+## 5. Criar o repositório para RefreshToken
+
+```java
+
+
+package com.fairpay.repository;
+
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    Optional<RefreshToken> findByToken(String token);
+    Optional<RefreshToken> findByUser(User user);
+    @Modifying
+    int deleteByUser(User user);
+}
+```
+
+## 6. Implementar exceção de token expirado
+
+```java
+// filepath: /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/exception/TokenRefreshException.java
+package com.fairpay.exception;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+@ResponseStatus(HttpStatus.FORBIDDEN)
+public class TokenRefreshException extends RuntimeException {
+    
+    private static final long serialVersionUID = 1L;
+
+    public TokenRefreshException(String token, String message) {
+        super(String.format("Falha para [%s]: %s", token, message));
+    }
+}
+```
+
+## 7. Criar DTOs para autenticação
+
+```java
+
+
+/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/dto/LoginRequestDTO.java
+package com.fairpay.dto;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class LoginRequestDTO {
+    
+    @NotBlank(message = "Email não pode ser vazio")
+    @Email(message = "Email deve ser válido")
+    private String email;
+
+    @NotBlank(message = "Senha não pode ser vazia")
+    private String password;
+}
+```
+
+```java
+
+
+package com.fairpay.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+@Builder
+public class TokenResponseDTO {
+    private String accessToken;
+    private String refreshToken;
+    private String tokenType = "Bearer";
+}
+```
+
+```java
+
+
+package com.fairpay.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
+@Data
+public class RefreshTokenRequestDTO {
+    @NotBlank
+    private String refreshToken;
+}
+```
+
+## 8. Atualizar a classe AuthenticatedUser para implementar UserDetails
+
+```java
+
+
+package com.fairpay.security;
+
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class AuthenticatedUser implements UserDetails {
+    
+    private Long id;
+    private String email;
+    private String password;
+    private Collection<? extends GrantedAuthority> authorities;
+
+    public AuthenticatedUser(Long id, String email, String password, List<String> roles) {
+        this.id = id;
+        this.email = email;
+        this.password = password;
+        this.authorities = roles.stream()
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toList());
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return authorities;
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return email;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+}
+```
+
+## 9. Implementar serviço para RefreshToken
+
+```java
+// filepath: /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/service/RefreshTokenService.java
+package com.fairpay.service;
+
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class RefreshTokenService {
+    
+    @Value("${jwt.refreshExpiration}")
+    private Long refreshTokenDuration;
+    
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    public Optional<RefreshToken> findByToken(String token) {
+        return refreshTokenRepository.findByToken(token);
+    }
+    
+    public RefreshToken createRefreshToken(Long userId) {
+        RefreshToken refreshToken = new RefreshToken();
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+                
+        // Remove any existing refresh token for this user
+        refreshTokenRepository.findByUser(user).ifPresent(token -> 
+            refreshTokenRepository.delete(token)
+        );
+
+        refreshToken.setUser(user);
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDuration));
+        refreshToken.setToken(UUID.randomUUID().toString());
+
+        refreshToken = refreshTokenRepository.save(refreshToken);
+        
+        return refreshToken;
+    }
+
+    public RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            refreshTokenRepository.delete(token);
+            throw new TokenRefreshException(token.getToken(), 
+                "Refresh token expirado. Faça login novamente");
+        }
+
+        return token;
+    }
+
+    @Transactional
+    public void deleteByUserId(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+                
+        refreshTokenRepository.deleteByUser(user);
+    }
+}
+```
+
+## 10. Implementar UserDetailsService personalizado
+
+```java
+
+
+package com.fairpay.security;
+
+import com.fairpay.model.User;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+
+@Service
+public class CustomUserDetailsService implements UserDetailsService {
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    @Override
+    @Transactional
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("Usuário não encontrado com email: " + email));
+
+        return new AuthenticatedUser(
+                user.getId(),
+                user.getEmail(),
+                user.getPassword(),
+                new ArrayList<>() // Roles podem ser adicionadas aqui se necessário
+        );
+    }
+}
+```
+
+## 11. Implementar filtro JWT para autenticação
+
+```java
+
+
+package com.fairpay.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    
+    @Autowired
+    private JwtTokenProvider tokenProvider;
+    
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        
+        try {
+            String token = getTokenFromRequest(request);
+            
+            if (StringUtils.hasText(token) && tokenProvider.validateToken(token)) {
+                String username = tokenProvider.getUsernameFromToken(token);
+                
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication = 
+                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private String getTokenFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        
+        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        
+        return null;
+    }
+}
+```
+
+## 12. Criar o serviço de autenticação
+
+```java
+
+
+/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/service/AuthService.java
+package com.fairpay.service;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.security.JwtTokenProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.regex.Pattern;
+
+@Service
+public class AuthService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    
+    @Autowired
+    private JwtTokenProvider tokenProvider;
+    
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+    
+    // Regex para validação de e-mail (padrão simples)
+    private static final Pattern EMAIL_PATTERN = 
+        Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");
+
+    public User register(RegisterRequestDTO registerDto) {
+        // Validar nome
+        if (registerDto.getName() == null || registerDto.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Nome não pode ser vazio.");
+        }
+        
+        // Validar formato de e-mail
+        if (registerDto.getEmail() == null || 
+            !EMAIL_PATTERN.matcher(registerDto.getEmail()).matches()) {
+            throw new IllegalArgumentException("Formato de e-mail inválido.");
+        }
+        
+        // Verificar se e-mail já existe
+        if (userRepository.existsByEmail(registerDto.getEmail())) {
+            throw new RuntimeException("E-mail já está em uso.");
+        }
+        
+        // Validar se as senhas são iguais
+        if (!registerDto.getPassword().equals(registerDto.getConfirmPassword())) {
+            throw new IllegalArgumentException("Senhas não coincidem.");
+        }
+        
+        // Criar novo usuário
+        User newUser = new User();
+        newUser.setName(registerDto.getName());
+        newUser.setEmail(registerDto.getEmail());
+        newUser.setPassword(passwordEncoder.encode(registerDto.getPassword()));
+        newUser.setCreatedAt(LocalDateTime.now());
+        
+        // Salvar e retornar o usuário
+        return userRepository.save(newUser);
+    }
+    
+    public TokenResponseDTO login(LoginRequestDTO loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+
+        String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+        
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+        return TokenResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken.getToken())
+                .tokenType("Bearer")
+                .build();
+    }
+
+    public TokenResponseDTO refreshToken(String refreshTokenStr) {
+        return refreshTokenService.findByToken(refreshTokenStr)
+                .map(refreshTokenService::verifyExpiration)
+                .map(refreshToken -> {
+                    User user = refreshToken.getUser();
+                    AuthenticatedUser userDetails = new AuthenticatedUser(
+                            user.getId(),
+                            user.getEmail(),
+                            user.getPassword(),
+                            java.util.Collections.emptyList()
+                    );
+                    
+                    String accessToken = tokenProvider.generateAccessToken(userDetails, user.getId());
+                    
+                    return TokenResponseDTO.builder()
+                            .accessToken(accessToken)
+                            .refreshToken(refreshTokenStr)
+                            .tokenType("Bearer")
+                            .build();
+                })
+                .orElseThrow(() -> new TokenRefreshException(refreshTokenStr, 
+                        "Refresh token não encontrado na base de dados"));
+    }
+    
+    public void logout(Long userId) {
+        refreshTokenService.deleteByUserId(userId);
+    }
+}
+```
+
+## 13. Atualizar o controlador de autenticação
+
+```java
+
+
+package com.fairpay.controller;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RefreshTokenRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.User;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
+    @Autowired
+    private AuthService authService;
+
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@RequestBody RegisterRequestDTO request, HttpServletRequest httpRequest) {
+        // Registra o usuário e obtém o resultado
+        User registeredUser = authService.register(request);
+        
+        // Cria o objeto de resposta no formato desejado
+        var response = new Object() {
+            public final boolean success = true;
+            public final String message = "Usuário registrado com sucesso!";
+            public final Object user = new Object() {
+                public final Long id = registeredUser.getId();
+                public final String name = registeredUser.getName();
+                public final String email = registeredUser.getEmail();
+            };
+        };
+        
+        return ResponseEntity.ok(response);
+    }
+    
+    @PostMapping("/login")
+    public ResponseEntity<TokenResponseDTO> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        TokenResponseDTO tokenResponse = authService.login(loginRequest);
+        return ResponseEntity.ok(tokenResponse);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        try {
+            TokenResponseDTO response = authService.refreshToken(request.getRefreshToken());
+            return ResponseEntity.ok(response);
+        } catch (TokenRefreshException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logoutUser(@AuthenticationPrincipal AuthenticatedUser user) {
+        Long userId = user.getId();
+        authService.logout(userId);
+        return ResponseEntity.ok().body("Logout realizado com sucesso!");
+    }
+}
+```
+
+## 14. Atualizar a configuração de segurança
+
+```java
+
+
+package com.fairpay.config;
+
+import com.fairpay.security.JwtAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+    
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthFilter;
+    
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        
+        return authProvider;
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh").permitAll()
+                .requestMatchers("/api/public/**").permitAll()
+                .anyRequest().authenticated()
+            );
+            
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+}
+```
+
+## 15. Adicionar repositório para verificar se o email já existe
+
+No UserRepository, adicione (se não existir):
+
+```java
+
+
+package com.fairpay.repository;
+
+import com.fairpay.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);
+    boolean existsByEmail(String email);
+}
+```
+
+## 16. Adicionar interface no application.properties para gerar a chave de segurança
+
+```properties
+# Antes de ir para produção, substitua esta chave por uma chave segura (256 bits ou mais)
+# Você pode gerar uma chave usando: 
+# Base64.getEncoder().encodeToString(KeyGenerator.getInstance("HmacSHA256").generateKey().getEncoded())
+jwt.secret=qwerty12345678901234567890123456789012345678901234567890123456789012345678901234567890
+```
+
+## Como testar
+
+1. **Registrar um usuário**:
+   ```
+   POST /api/auth/register
+   {
+     "name": "Teste",
+     "email": "teste@example.com",
+     "password": "senha123",
+     "confirmPassword": "senha123"
+   }
+   ```
+
+2. **Login**:
+   ```
+   POST /api/auth/login
+   {
+     "email": "teste@example.com",
+     "password": "senha123"
+   }
+   ```
+
+3. **Atualizar token**:
+   ```
+   POST /api/auth/refresh
+   {
+     "refreshToken": "token-recebido-no-login"
+   }
+   ```
+
+4. **Testar endpoint autenticado**:
+   ```
+   GET /api/groups
+   Authorization: Bearer seu-token-aqui
+   ```
+
+Esta implementação aproveita as bibliotecas que você já tem no projeto, sem precisar adicionar a dependência `jjwt` explicitamente, utilizando as funcionalidades do `spring-boot-starter-oauth2-resource-server`.
+
+Código semelhante encontrado com 5 tipos de licença
+
+Victor476: como consigo a jwt.secret?
+
+GitHub Copilot: # Geração da Chave Secreta para JWT
+
+Para gerar uma chave segura para o JWT, você pode criar uma chave aleatória com tamanho adequado (pelo menos 256 bits). Vamos seguir estas etapas:
+
+## 1. Adicione a configuração no 
+
+application.properties
+
+
+
+```java-properties
+
+
+spring.application.name=fairpay
+
+server.port=8090
+spring.datasource.url=jdbc:postgresql://localhost:5432/fairpay_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.jpa.hibernate.ddl-auto=update
+spring.datasource.hikari.minimum-idle=5
+spring.datasource.hikari.maximum-pool-size=10
+spring.datasource.hikari.idle-timeout=30000
+spring.datasource.hikari.pool-name=HikariPool-1
+spring.datasource.hikari.max-lifetime=1800000
+
+# JWT Configuration
+jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+jwt.expiration=900000
+jwt.refreshExpiration=86400000
+```
+
+## 2. Crie uma classe utilitária para gerar a chave
+
+Você pode criar uma classe simples para gerar a chave secreta quando precisar atualizar:
+
+```java
+
+
+package com.fairpay.util;
+
+import javax.crypto.KeyGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+
+public class JwtSecretGenerator {
+    
+    public static void main(String[] args) {
+        try {
+            KeyGenerator keyGen = KeyGenerator.getInstance("HmacSHA256");
+            keyGen.init(256); // Chave de 256 bits
+            byte[] secretKey = keyGen.generateKey().getEncoded();
+            String base64Secret = Base64.getEncoder().encodeToString(secretKey);
+            
+            System.out.println("Adicione esta chave ao seu application.properties:");
+            System.out.println("jwt.secret=" + base64Secret);
+            
+        } catch (NoSuchAlgorithmException e) {
+            System.err.println("Erro ao gerar a chave: " + e.getMessage());
+        }
+    }
+}
+```
+
+## Como usar:
+
+1. Compile e execute esta classe para gerar uma nova chave aleatória.
+
+2. Copie a chave gerada e cole como valor da propriedade `jwt.secret` no seu arquivo 
+
+application.properties
+
+.
+
+3. Para ambientes de produção, mantenha esta chave segura e não a exponha em repositórios públicos.
+
+## Observações sobre a chave fornecida:
+
+A chave que já adicionei no exemplo acima (`YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==`) é uma chave aleatória gerada de 256 bits, codificada em Base64. Esta chave é segura para uso em desenvolvimento, mas para ambientes de produção você provavelmente deveria gerar uma nova usando o método acima.
+
+**Importante:** Em ambientes de produção, você não deve armazenar chaves secretas diretamente no 
+
+application.properties
+
+. Em vez disso, use variáveis de ambiente ou um serviço de gerenciamento de configuração segura como o AWS Parameter Store, Azure Key Vault, ou Spring Cloud Config Server com criptografia.
+
+Para ambiente de produção, você poderia usar:
+```properties
+jwt.secret=${JWT_SECRET}
+```
+
+E então definir a variável de ambiente `JWT_SECRET` no seu servidor de produção.
+
+Victor476: no arquivo JwtUtils ele não está sabendo importar as importações
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+
+GitHub Copilot: # Corrigindo as Importações JJWT
+
+O problema é que você está utilizando o código que propus, mas não tem as dependências corretas do JJWT no seu projeto. Vamos adicionar as dependências necessárias ao seu arquivo 
+
+pom.xml
+
+ e consertar o problema:
+
+## 1. Adicionar dependências JJWT ao 
+
+pom.xml
+
+
+
+```xml
+
+
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.4.4</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.fairpay</groupId>
+	<artifactId>fairpay-backend</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>fairpay</name>
+	<description>Demo project for Spring Boot</description>
+	<properties>
+		<java.version>21</java.version>
+	</properties>
+
+	<dependencies>
+		<!-- Adicione estas dependências do JJWT -->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>0.11.5</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>0.11.5</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>0.11.5</version>
+			<scope>runtime</scope>
+		</dependency>
+		
+		<!-- Mantenha suas dependências existentes -->
+
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- Seus plugins existentes -->
+		</plugins>
+	</build>
+
+</project>
+```
+
+## 2. Alternativa: Refatore o JwtUtils para usar a biblioteca padrão do JDK
+
+Se você não quiser adicionar as dependências JJWT, você pode refatorar a classe JwtUtils para usar apenas as bibliotecas padrão e o Spring Security Core:
+
+```java
+
+
+package com.fairpay.security;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.*;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+
+@Component
+public class JwtUtils {
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private long jwtExpirationMs;
+
+    private final JwtEncoder jwtEncoder;
+    private final JwtDecoder jwtDecoder;
+
+    public JwtUtils(@Value("${jwt.secret}") String jwtSecret) {
+        SecretKey key = new SecretKeySpec(Base64.getDecoder().decode(jwtSecret), "HmacSHA256");
+        
+        NimbusJwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecretKeyJwkSource(key));
+        this.jwtEncoder = encoder;
+        
+        NimbusJwtDecoder decoder = NimbusJwtDecoder
+                .withSecretKey(key)
+                .macAlgorithm(MacAlgorithm.HS256)
+                .build();
+        this.jwtDecoder = decoder;
+    }
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .subject(userPrincipal.getUsername())
+                .issuedAt(now)
+                .expiresAt(now.plusMillis(jwtExpirationMs))
+                .claim("userId", userPrincipal.getId())
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+    }
+    
+    public String generateJwtToken(AuthenticatedUser user) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .subject(user.getUsername())
+                .issuedAt(now)
+                .expiresAt(now.plusMillis(jwtExpirationMs))
+                .claim("userId", user.getId())
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        Jwt jwt = jwtDecoder.decode(token);
+        return jwt.getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        Jwt jwt = jwtDecoder.decode(token);
+        return jwt.getClaim("userId");
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            jwtDecoder.decode(authToken);
+            return true;
+        } catch (Exception e) {
+            // JwtException, IllegalArgumentException ou outra exceção
+            return false;
+        }
+    }
+    
+    private static class ImmutableSecretKeyJwkSource implements JWKSource<SecretKey> {
+        private final SecretKey secretKey;
+        
+        public ImmutableSecretKeyJwkSource(SecretKey secretKey) {
+            this.secretKey = secretKey;
+        }
+        
+        @Override
+        public JWK getJWK(JWSHeader header, SecretKey context) {
+            return new OctetSequenceKey.Builder(secretKey).build();
+        }
+    }
+}
+```
+
+## 3. Alternativa mais simples: Use apenas o Spring Boot OAuth2 Resource Server
+
+Se você estiver usando Spring Boot 3.x, pode simplificar muito usando o suporte nativo a JWT:
+
+```xml
+<!-- Adicione esta dependência no pom.xml -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+</dependency>
+```
+
+Então você pode simplificar o código:
+
+```java
+
+
+package com.fairpay.security;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.*;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+
+@Component
+public class JwtUtils {
+
+    @Value("${jwt.expiration}")
+    private long jwtExpirationMs;
+
+    private final JwtEncoder jwtEncoder;
+    private final JwtDecoder jwtDecoder;
+
+    public JwtUtils(JwtEncoder jwtEncoder, JwtDecoder jwtDecoder) {
+        this.jwtEncoder = jwtEncoder;
+        this.jwtDecoder = jwtDecoder;
+    }
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .subject(userPrincipal.getUsername())
+                .issuedAt(now)
+                .expiresAt(now.plusMillis(jwtExpirationMs))
+                .claim("userId", userPrincipal.getId())
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+    }
+    
+    public String generateJwtToken(AuthenticatedUser user) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .subject(user.getUsername())
+                .issuedAt(now)
+                .expiresAt(now.plusMillis(jwtExpirationMs))
+                .claim("userId", user.getId())
+                .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        Jwt jwt = jwtDecoder.decode(token);
+        return jwt.getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        Jwt jwt = jwtDecoder.decode(token);
+        return jwt.getClaim("userId");
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            jwtDecoder.decode(authToken);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
+```
+
+E adicione esta configuração:
+
+```java
+
+
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
+
+@Configuration
+public class JwtConfig {
+    
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+    
+    @Bean
+    public SecretKey secretKey() {
+        return new SecretKeySpec(Base64.getDecoder().decode(jwtSecret), "HmacSHA256");
+    }
+    
+    @Bean
+    public JwtDecoder jwtDecoder(SecretKey secretKey) {
+        return NimbusJwtDecoder.withSecretKey(secretKey).build();
+    }
+    
+    @Bean
+    public JwtEncoder jwtEncoder(SecretKey secretKey) {
+        return new NimbusJwtEncoder(new JWKSource<SecurityContext>() {
+            @Override
+            public JWK getJWK(JWSHeader header, SecurityContext context) {
+                return new OctetSequenceKey.Builder(secretKey).build();
+            }
+        });
+    }
+}
+```
+
+## Recomendação Final
+
+O mais simples é adicionar as dependências do JJWT ao seu 
+
+pom.xml
+
+ como mostrei na opção 1. Esta é a abordagem mais direta e vai resolver seu problema de importação com uma alteração mínima no código.
+
+Após adicionar as dependências, execute o Maven para baixá-las:
+```bash
+cd /path/to/your/project
+mvn clean install
+```
+
+Ou atualize as dependências no seu IDE (geralmente com botão direito no projeto → Maven → Update Project).
+
+Código semelhante encontrado com 4 tipos de licença
+
+Victor476: o que é esse erro
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-06-16T17:25:53.781-03:00 ERROR 22825 --- [fairpay] [  restartedMain] o.s.boot.SpringApplication               : Application run failed
+
+org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'jwtUtils': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:515) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.instantiateSingleton(DefaultListableBeanFactory.java:1155) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingleton(DefaultListableBeanFactory.java:1121) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingletons(DefaultListableBeanFactory.java:1056) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:987) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:627) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:146) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:752) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:439) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:318) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1361) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1350) ~[spring-boot-3.4.4.jar:3.4.4]
+        at com.fairpay.FairpayBackendApplication.main(FairpayBackendApplication.java:10) ~[classes/:na]
+        at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+        at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+        at org.springframework.boot.devtools.restart.RestartLauncher.run(RestartLauncher.java:50) ~[spring-boot-devtools-3.4.4.jar:3.4.4]
+Caused by: org.springframework.util.PlaceholderResolutionException: Could not resolve placeholder 'app.jwt.secret' in value "${app.jwt.secret}"
+        at org.springframework.util.PlaceholderResolutionException.withValue(PlaceholderResolutionException.java:81) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser$ParsedValue.resolve(PlaceholderParser.java:423) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser.replacePlaceholders(PlaceholderParser.java:128) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.parseStringValue(PropertyPlaceholderHelper.java:118) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.replacePlaceholders(PropertyPlaceholderHelper.java:114) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.doResolvePlaceholders(AbstractPropertyResolver.java:255) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.resolveRequiredPlaceholders(AbstractPropertyResolver.java:226) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.PropertySourcesPlaceholderConfigurer.lambda$processProperties$0(PropertySourcesPlaceholderConfigurer.java:201) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.resolveEmbeddedValue(AbstractBeanFactory.java:971) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1577) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 22 common frames omitted
+
+GitHub Copilot: # Corrigindo o erro de propriedade não encontrada no JwtUtils
+
+O erro está ocorrendo porque na classe `JwtUtils` você está tentando injetar a propriedade `app.jwt.secret` com `@Value("${app.jwt.secret}")`, mas no seu arquivo `application.properties` a propriedade está definida como `jwt.secret` (sem o prefixo `app`).
+
+Vamos corrigir esse problema:
+
+## 1. Opção 1: Ajustar o nome da propriedade na classe JwtUtils
+
+```java
+
+
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtUtils {
+    private static final Logger logger = LoggerFactory.getLogger(JwtUtils.class);
+
+    // Correção: Mudando de app.jwt.secret para jwt.secret
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    // Correção: Mudando de app.jwt.expiration para jwt.expiration
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+
+    // Resto da classe permanece igual
+    // ...
+}
+```
+
+## 2. Opção 2: Adicionar o prefixo app no application.properties
+
+```java-properties
+
+
+# Adicionar prefixo app nas propriedades JWT
+app.jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+app.jwt.expiration=900000
+app.jwt.refreshExpiration=86400000
+
+# Manter as propriedades existentes para compatibilidade com código já existente
+jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+jwt.expiration=900000
+jwt.refreshExpiration=86400000
+```
+
+## 3. Verificar o caminho do arquivo AuthService
+
+Percebo que o seu arquivo 
+
+AuthService.java
+
+ está no diretório de teste:
+
+```
+/home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/test/java/com/fairpay/service/AuthService.java
+```
+
+Isso pode causar conflitos se você também tiver o mesmo serviço no diretório principal:
+
+```
+/home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/service/AuthService.java
+```
+
+Certifique-se de que a implementação real do serviço está no diretório principal e não no diretório de teste, a menos que você esteja criando um mock para testes.
+
+## 4. Classes com inicialização inadequada - Isso pode ajudar a evitar outros erros
+
+Além do problema principal, verifique também se:
+
+1. Se você estiver usando construtores com injeção de dependência, certifique-se de que todos os parâmetros possam ser resolvidos pelo Spring.
+
+Por exemplo, se você tiver um construtor como:
+
+```java
+public JwtUtils(JwtEncoder jwtEncoder, JwtDecoder jwtDecoder) {
+    this.jwtEncoder = jwtEncoder;
+    this.jwtDecoder = jwtDecoder;
+}
+```
+
+Certifique-se de que `JwtEncoder` e `JwtDecoder` estão registrados como beans no Spring.
+
+## 5. Solução Completa para JwtUtils - Abordagem Simples
+
+Sugiro usar uma abordagem mais simples com a biblioteca `jjwt`:
+
+```java
+
+
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtUtils {
+    private static final Logger logger = LoggerFactory.getLogger(JwtUtils.class);
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        return Jwts.builder()
+                .setSubject(userPrincipal.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userPrincipal.getId())
+                .compact();
+    }
+    
+    public String generateJwtToken(AuthenticatedUser user) {
+        return Jwts.builder()
+                .setSubject(user.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", user.getId())
+                .compact();
+    }
+
+    private Key key() {
+        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parserBuilder().setSigningKey(key()).build().parseClaimsJws(authToken);
+            return true;
+        } catch (MalformedJwtException e) {
+            logger.error("Token JWT inválido: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("Token JWT expirado: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("Token JWT não suportado: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("String de claim JWT vazia: {}", e.getMessage());
+        }
+
+        return false;
+    }
+}
+```
+
+Essa versão é mais simples e direta, dependendo apenas das propriedades `jwt.secret` e `jwt.expiration` no seu `application.properties`.
+
+Certifique-se de ter adicionado as dependências do `jjwt` em seu 
+
+pom.xml
+
+ conforme mencionado anteriormente.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: eu preciso criar outro controler pra registro ou não tem problema adicionar no autenticação?
+
+GitHub Copilot: # Organização do AuthController
+
+Você não precisa criar outro controller para registro. O padrão comum é manter todas as operações relacionadas à autenticação (login, registro, refresh token, etc.) no mesmo controller (`AuthController`).
+
+Vamos atualizar seu `AuthController` para incluir todos os endpoints de autenticação:
+
+```java
+
+
+package com.fairpay.controller;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RefreshTokenRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.User;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
+    @Autowired
+    private AuthService authService;
+
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@RequestBody RegisterRequestDTO request, HttpServletRequest httpRequest) {
+        // Registra o usuário e obtém o resultado
+        User registeredUser = authService.register(request);
+        
+        // Gerar tokens reais usando o serviço de autenticação
+        TokenResponseDTO tokenResponse = authService.generateTokensForNewUser(registeredUser);
+        
+        // Cria o objeto de resposta no formato desejado
+        var response = new Object() {
+            public final boolean success = true;
+            public final String message = "Usuário registrado com sucesso!";
+            public final Object user = new Object() {
+                public final Long id = registeredUser.getId();
+                public final String name = registeredUser.getName();
+                public final String email = registeredUser.getEmail();
+            };
+            public final String accessToken = tokenResponse.getAccessToken();
+            public final String refreshToken = tokenResponse.getRefreshToken();
+        };
+        
+        return ResponseEntity.ok(response);
+    }
+    
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        try {
+            TokenResponseDTO tokenResponse = authService.login(loginRequest);
+            
+            // Buscando informações do usuário para a resposta
+            User user = authService.findUserByEmail(loginRequest.getEmail());
+            
+            var response = new Object() {
+                public final boolean success = true;
+                public final String message = "Login realizado com sucesso!";
+                public final Object user = new Object() {
+                    public final Long id = user.getId();
+                    public final String name = user.getName();
+                    public final String email = user.getEmail();
+                };
+                public final String accessToken = tokenResponse.getAccessToken();
+                public final String refreshToken = tokenResponse.getRefreshToken();
+            };
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            var response = new Object() {
+                public final boolean success = false;
+                public final String message = e.getMessage();
+            };
+            
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        try {
+            TokenResponseDTO tokenResponse = authService.refreshToken(request.getRefreshToken());
+            
+            var response = new Object() {
+                public final boolean success = true;
+                public final String accessToken = tokenResponse.getAccessToken();
+                public final String refreshToken = tokenResponse.getRefreshToken();
+            };
+            
+            return ResponseEntity.ok(response);
+        } catch (TokenRefreshException e) {
+            var response = new Object() {
+                public final boolean success = false;
+                public final String message = e.getMessage();
+            };
+            
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@AuthenticationPrincipal AuthenticatedUser user) {
+        Long userId = user.getId();
+        authService.logout(userId);
+        
+        var response = new Object() {
+            public final boolean success = true;
+            public final String message = "Logout realizado com sucesso!";
+        };
+        
+        return ResponseEntity.ok().body(response);
+    }
+    
+    // Para um endpoint que necessita de autenticação e retorna dados do usuário atual
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal AuthenticatedUser user) {
+        User currentUser = authService.findUserById(user.getId());
+        
+        var response = new Object() {
+            public final Long id = currentUser.getId();
+            public final String name = currentUser.getName();
+            public final String email = currentUser.getEmail();
+            // Outros campos que queira expor
+        };
+        
+        return ResponseEntity.ok(response);
+    }
+}
+```
+
+## Adicionando os métodos necessários no AuthService
+
+Para implementar o controller acima, vamos adicionar os métodos necessários no `AuthService`:
+
+```java
+
+
+package com.fairpay.service;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.security.JwtUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.regex.Pattern;
+
+@Service
+public class AuthService {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    
+    @Autowired
+    private JwtUtils jwtUtils;
+    
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+    
+    // Regex para validação de e-mail (padrão simples)
+    private static final Pattern EMAIL_PATTERN = 
+        Pattern.compile("^[A-Za-z0-9+_.-]+@(.+)$");
+
+    public User register(RegisterRequestDTO registerDto) {
+        // Validar nome
+        if (registerDto.getName() == null || registerDto.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Nome não pode ser vazio.");
+        }
+        
+        // Validar formato de e-mail
+        if (registerDto.getEmail() == null || 
+            !EMAIL_PATTERN.matcher(registerDto.getEmail()).matches()) {
+            throw new IllegalArgumentException("Formato de e-mail inválido.");
+        }
+        
+        // Verificar se e-mail já existe
+        if (userRepository.existsByEmail(registerDto.getEmail())) {
+            throw new RuntimeException("E-mail já está em uso.");
+        }
+        
+        // Validar se as senhas são iguais
+        if (!registerDto.getPassword().equals(registerDto.getConfirmPassword())) {
+            throw new IllegalArgumentException("Senhas não coincidem.");
+        }
+        
+        // Criar novo usuário
+        User newUser = new User();
+        newUser.setName(registerDto.getName());
+        newUser.setEmail(registerDto.getEmail());
+        newUser.setPassword(passwordEncoder.encode(registerDto.getPassword()));
+        newUser.setCreatedAt(LocalDateTime.now());
+        
+        // Salvar e retornar o usuário
+        return userRepository.save(newUser);
+    }
+    
+    public TokenResponseDTO generateTokensForNewUser(User user) {
+        // Criar um userDetails para o novo usuário
+        AuthenticatedUser userDetails = new AuthenticatedUser(
+                user.getId(),
+                user.getEmail(),
+                user.getPassword(),
+                new ArrayList<>()
+        );
+        
+        // Gerar access token
+        String accessToken = jwtUtils.generateJwtToken(userDetails);
+        
+        // Gerar refresh token
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
+        
+        return TokenResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken.getToken())
+                .tokenType("Bearer")
+                .build();
+    }
+    
+    public TokenResponseDTO login(LoginRequestDTO loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+
+        String accessToken = jwtUtils.generateJwtToken(userDetails);
+        
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+        return TokenResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken.getToken())
+                .tokenType("Bearer")
+                .build();
+    }
+
+    public TokenResponseDTO refreshToken(String refreshTokenStr) {
+        return refreshTokenService.findByToken(refreshTokenStr)
+                .map(refreshTokenService::verifyExpiration)
+                .map(refreshToken -> {
+                    User user = refreshToken.getUser();
+                    AuthenticatedUser userDetails = new AuthenticatedUser(
+                            user.getId(),
+                            user.getEmail(),
+                            user.getPassword(),
+                            new ArrayList<>()
+                    );
+                    
+                    String accessToken = jwtUtils.generateJwtToken(userDetails);
+                    
+                    return TokenResponseDTO.builder()
+                            .accessToken(accessToken)
+                            .refreshToken(refreshTokenStr)
+                            .tokenType("Bearer")
+                            .build();
+                })
+                .orElseThrow(() -> new TokenRefreshException(refreshTokenStr, 
+                        "Refresh token não encontrado na base de dados"));
+    }
+    
+    public void logout(Long userId) {
+        refreshTokenService.deleteByUserId(userId);
+    }
+    
+    public User findUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com email: " + email));
+    }
+    
+    public User findUserById(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + id));
+    }
+}
+```
+
+## Observações
+
+1. Mantive todos os endpoints de autenticação no mesmo controller (`/api/auth/*`), o que é uma prática comum.
+
+2. Adicionei um padrão de resposta com `success` e 
+
+message
+
+ para facilitar a integração com o frontend.
+
+3. Adicionei um endpoint `/api/auth/me` que pode ser útil para verificar a autenticação e obter os dados do usuário atual.
+
+4. Implementei métodos auxiliares no `AuthService` para buscar usuários por ID e email.
+
+5. O método `generateTokensForNewUser` facilita a geração de tokens para um usuário recém-registrado sem precisar de autenticação formal.
+
+Este padrão é escalável e seguirá funcionando bem à medida que você adicionar mais funcionalidades relacionadas à autenticação, como verificação de email, redefinição de senha, etc.
+
+Código semelhante encontrado com 1 tipo de licença
+
+Victor476: porque ele esta pedindo uma importação de 
+
+import com.fairpay.security.JwtTokenProvider;
+?
+
+GitHub Copilot: # Resolvendo o problema de importação JwtTokenProvider vs JwtUtils
+
+O problema aconteceu porque na sua implementação, a classe se chama 
+
+JwtTokenProvider
+
+, mas nas minhas sugestões eu estava chamando `JwtUtils`. Isso ocorreu porque ambos os nomes são comuns para essa funcionalidade e estávamos trabalhando com implementações diferentes.
+
+## 1. Verificando a situação atual
+
+Pelo código no seu 
+
+AuthService.java
+
+, você já está usando 
+
+JwtTokenProvider
+
+:
+
+```java
+@Autowired
+private JwtTokenProvider tokenProvider;
+```
+
+E as chamadas no código estão usando os métodos desse provider:
+
+```java
+String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+```
+
+## 2. Soluções possíveis
+
+### Opção 1: Renomear a referência JwtUtils para JwtTokenProvider
+
+Se você já criou a classe 
+
+JwtTokenProvider
+
+ no projeto, então o correto é continuar usando esse nome. Neste caso, você deve:
+
+1. Garantir que a classe implementada tenha o nome 
+
+JwtTokenProvider
+
+
+2. Garantir que a classe contenha o método 
+
+generateAccessToken
+
+
+
+### Opção 2: Criar a classe JwtTokenProvider
+
+Se você ainda não criou essa classe, aqui está a implementação correta:
+
+```java
+
+
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtTokenProvider {
+    private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private long jwtExpirationMs;
+
+    @Value("${jwt.refreshExpiration}")
+    private long refreshExpirationMs;
+
+    public String generateAccessToken(UserDetails userDetails, Long userId) {
+        return generateToken(userDetails, userId, jwtExpirationMs);
+    }
+
+    public String generateRefreshToken(UserDetails userDetails, Long userId) {
+        return generateToken(userDetails, userId, refreshExpirationMs);
+    }
+
+    private String generateToken(UserDetails userDetails, Long userId, long expirationMs) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + expirationMs);
+        
+        return Jwts.builder()
+                .setSubject(userDetails.getUsername())
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .claim("userId", userId)
+                .compact();
+    }
+
+    public String getUsernameFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        return claims.getSubject();
+    }
+    
+    public Long getUserIdFromToken(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        return claims.get("userId", Long.class);
+    }
+
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parserBuilder().setSigningKey(getSigningKey()).build().parseClaimsJws(token);
+            return true;
+        } catch (MalformedJwtException e) {
+            logger.error("Token JWT inválido: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("Token JWT expirado: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("Token JWT não suportado: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("String de claims JWT vazia: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    private Key getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+}
+```
+
+## 3. Implementar os métodos adicionais solicitados
+
+Baseado no seu código 
+
+AuthService.java
+
+, você também precisará implementar o método `generateTokensForNewUser`:
+
+```java
+
+
+// Adicione este método à sua classe AuthService
+
+public TokenResponseDTO generateTokensForNewUser(User user) {
+    // Criar um userDetails para o novo usuário
+    AuthenticatedUser userDetails = new AuthenticatedUser(
+            user.getId(),
+            user.getEmail(),
+            user.getPassword(),
+            java.util.Collections.emptyList()
+    );
+    
+    // Gerar access token
+    String accessToken = tokenProvider.generateAccessToken(userDetails, user.getId());
+    
+    // Gerar refresh token
+    RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
+    
+    return TokenResponseDTO.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken.getToken())
+            .tokenType("Bearer")
+            .build();
+}
+
+// Adicione também estes métodos auxiliares
+public User findUserByEmail(String email) {
+    return userRepository.findByEmail(email)
+            .orElseThrow(() -> new RuntimeException("Usuário não encontrado com email: " + email));
+}
+
+public User findUserById(Long id) {
+    return userRepository.findById(id)
+            .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + id));
+}
+```
+
+## 4. Garantir que o filtro JWT use o JwtTokenProvider também
+
+Se você já implementou um filtro JWT para autenticação, certifique-se de que ele também esteja usando 
+
+JwtTokenProvider
+
+:
+
+```java
+
+
+package com.fairpay.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    
+    @Autowired
+    private JwtTokenProvider tokenProvider;  // Use JwtTokenProvider em vez de JwtUtils
+    
+    @Autowired
+    private UserDetailsService userDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        
+        try {
+            String jwt = parseJwt(request);
+            
+            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
+                String username = tokenProvider.getUsernameFromToken(jwt);
+                
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication = 
+                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+        
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);
+        }
+        
+        return null;
+    }
+}
+```
+
+## Resumindo
+
+O problema está ocorrendo porque há inconsistência no nome da classe entre o código atual (
+
+JwtTokenProvider
+
+) e o código sugerido anteriormente (`JwtUtils`). Certifique-se de usar um nome consistente em todo o projeto e de implementar todos os métodos necessários.
+
+Qualquer das abordagens (renomear para `JwtUtils` ou implementar 
+
+JwtTokenProvider
+
+ como mostrado acima) resolverá o problema, mas manter a consistência é fundamental.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: ele está chamando esse erro aqui pra todo esse pedaço de código
+
+Cannot infer type argument(s) for <U> map(Function<? super T,? extends U>)
+
+        return refreshTokenService.findByToken(refreshTokenStr)
+                .map(refreshTokenService::verifyExpiration)
+                .map(refreshToken -> {
+                    User user = refreshToken.getUser();
+                    AuthenticatedUser userDetails = new AuthenticatedUser(
+                            user.getId(),
+                            user.getEmail(),
+                            user.getPassword(),
+                            java.util.Collections.emptyList()
+                    );
+                    
+                    String accessToken = tokenProvider.generateAccessToken(userDetails, user.getId());
+                    
+                    return TokenResponseDTO.builder()
+                            .accessToken(accessToken)
+                            .refreshToken(refreshTokenStr)
+                            .tokenType("Bearer")
+                            .build();
+                })
+
+GitHub Copilot: # Corrigindo o erro de inferência de tipo no método refreshToken
+
+O erro "Cannot infer type argument(s) for <U> map(Function<? super T,? extends U>)" ocorre porque o compilador Java não consegue determinar automaticamente o tipo de retorno da função lambda no método 
+
+map
+
+. Isso geralmente acontece quando há ambiguidade ou quando a cadeia de chamadas não está completa.
+
+Vamos corrigir esse problema:
+
+## 1. Solução - Versão Explícita
+
+```java
+
+
+public TokenResponseDTO refreshToken(String refreshTokenStr) {
+    return refreshTokenService.findByToken(refreshTokenStr)
+            .map(token -> refreshTokenService.verifyExpiration(token))
+            .map(refreshToken -> {
+                User user = refreshToken.getUser();
+                AuthenticatedUser userDetails = new AuthenticatedUser(
+                        user.getId(),
+                        user.getEmail(),
+                        user.getPassword(),
+                        java.util.Collections.emptyList()
+                );
+                
+                String accessToken = tokenProvider.generateAccessToken(userDetails, user.getId());
+                
+                return TokenResponseDTO.builder()
+                        .accessToken(accessToken)
+                        .refreshToken(refreshTokenStr)
+                        .tokenType("Bearer")
+                        .build();
+            })
+            .orElseThrow(() -> new TokenRefreshException(refreshTokenStr, 
+                    "Refresh token não encontrado na base de dados"));
+}
+```
+
+## 2. Solução Alternativa - Quebrar em Etapas
+
+Se o problema persistir, você pode quebrar o código em partes mais gerenciáveis:
+
+```java
+
+
+public TokenResponseDTO refreshToken(String refreshTokenStr) {
+    // Buscar e validar o token
+    RefreshToken refreshToken = refreshTokenService.findByToken(refreshTokenStr)
+            .orElseThrow(() -> new TokenRefreshException(refreshTokenStr, 
+                    "Refresh token não encontrado na base de dados"));
+    
+    // Verificar se o token não expirou
+    refreshToken = refreshTokenService.verifyExpiration(refreshToken);
+    
+    // Obter o usuário do token
+    User user = refreshToken.getUser();
+    
+    // Criar o userDetails
+    AuthenticatedUser userDetails = new AuthenticatedUser(
+            user.getId(),
+            user.getEmail(),
+            user.getPassword(),
+            java.util.Collections.emptyList()
+    );
+    
+    // Gerar novo access token
+    String accessToken = tokenProvider.generateAccessToken(userDetails, user.getId());
+    
+    // Retornar a resposta
+    return TokenResponseDTO.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshTokenStr)
+            .tokenType("Bearer")
+            .build();
+}
+```
+
+## 3. Verificar Assinatura do Método verifyExpiration
+
+O problema também pode estar relacionado à assinatura do método 
+
+verifyExpiration
+
+ no `RefreshTokenService`. Certifique-se de que o método tem esta assinatura:
+
+```java
+
+
+public RefreshToken verifyExpiration(RefreshToken token) {
+    if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+        refreshTokenRepository.delete(token);
+        throw new TokenRefreshException(token.getToken(), 
+            "Refresh token expirado. Faça login novamente");
+    }
+    
+    return token;
+}
+```
+
+## 4. Verificar a Definição da Classe TokenResponseDTO
+
+Certifique-se de que a classe 
+
+TokenResponseDTO
+
+ tenha um builder adequado:
+
+```java
+
+
+package com.fairpay.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class TokenResponseDTO {
+    private String accessToken;
+    private String refreshToken;
+    private String tokenType = "Bearer";
+}
+```
+
+## 5. Importações Necessárias
+
+Certifique-se de ter todas as importações necessárias:
+
+```java
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.security.AuthenticatedUser;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.function.Function;
+```
+
+A solução mais simples e limpa é a opção 2, que quebra a lógica em etapas distintas e evita a complexidade das chamadas encadeadas de 
+
+map()
+
+ que estão causando o problema de inferência de tipo.
+
+Victor476: teria alguma coisa faltando no 
+
+GitHub Copilot: 
+
+Victor476: teria alguma coisa faltando no TokenResponseDTO pra ter esse problema?
+
+essa linha também esta com uma reclamação tem algo haver?
+
+String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+
+The method generateAccessToken(AuthenticatedUser, Long) is undefined for the type JwtTokenProvider
+
+GitHub Copilot: # Corrigindo os Problemas com TokenResponseDTO e JwtTokenProvider
+
+Você está enfrentando dois problemas diferentes:
+
+## 1. Problema no TokenResponseDTO
+
+O erro ocorre porque no seu código você está tentando usar o método 
+
+build()
+
+ com um campo 
+
+tokenType
+
+, mas esse campo não está definido na sua classe `TokenResponseDTO`.
+
+### Solução:
+
+Adicione o campo 
+
+tokenType
+
+ à classe `TokenResponseDTO`:
+
+```java
+package com.fairpay.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
+@NoArgsConstructor  // Adicionar construtor vazio
+@Builder
+public class TokenResponseDTO {
+    
+    private String accessToken;
+    private String refreshToken;
+    private String tokenType;
+}
+```
+
+## 2. Problema no JwtTokenProvider
+
+O erro "The method generateAccessToken(AuthenticatedUser, Long) is undefined for the type JwtTokenProvider" indica que o método 
+
+generateAccessToken
+
+ na classe 
+
+JwtTokenProvider
+
+ não aceita os argumentos que você está passando.
+
+A assinatura do método provavelmente é diferente do que você está tentando usar.
+
+### Solução:
+
+Você precisa verificar como o método 
+
+generateAccessToken
+
+ está definido na sua classe 
+
+JwtTokenProvider
+
+ e ajustar a chamada ou a implementação:
+
+1. **Primeira opção** - Verifique a implementação atual:
+
+```java
+
+
+package com.fairpay.security;
+
+// Verifique a assinatura do método generateAccessToken
+// Deve ser algo como:
+public String generateAccessToken(UserDetails userDetails, Long userId) {
+    // implementação
+}
+```
+
+2. **Segunda opção** - Implemente ou corrija o método na classe JwtTokenProvider:
+
+```java
+
+
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtTokenProvider {
+    private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+
+    // Este é o método que está faltando ou que tem assinatura diferente
+    public String generateAccessToken(AuthenticatedUser userDetails, Long userId) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
+        
+        return Jwts.builder()
+                .setSubject(userDetails.getUsername())
+                .setIssuedAt(now)
+                .setExpiration(expiryDate)
+                .signWith(getSigningKey(), SignatureAlgorithm.HS256)
+                .claim("userId", userId)
+                .compact();
+    }
+
+    // Método para obter a chave de assinatura
+    private Key getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    // Outros métodos da classe...
+}
+```
+
+3. **Terceira opção** - Adapte seu código para usar o método existente:
+
+Se o método 
+
+generateAccessToken
+
+ tiver uma assinatura diferente, adapte a chamada:
+
+```java
+
+
+// Se o método for por exemplo:
+// public String generateToken(UserDetails userDetails)
+String accessToken = tokenProvider.generateToken(userDetails);
+
+// Ou se for:
+// public String generateToken(String username, Long userId)
+String accessToken = tokenProvider.generateToken(userDetails.getUsername(), userDetails.getId());
+```
+
+## Passos para resolver:
+
+1. Adicione o campo 
+
+tokenType
+
+ à classe 
+
+TokenResponseDTO
+
+ conforme mostrado.
+2. Verifique a implementação atual de 
+
+JwtTokenProvider
+
+ e especificamente o método 
+
+generateAccessToken
+
+.
+3. Ajuste o método ou a chamada para garantir que a assinatura esteja correta.
+
+Se você puder mostrar o código atual da sua classe 
+
+JwtTokenProvider
+
+, posso fornecer uma solução mais específica para o problema do método 
+
+generateAccessToken
+
+.
+
+Código semelhante encontrado com 1 tipo de licença
+
+Victor476: então o que preciso fazer no JwtTokenProvider e no AuthService?
+
+GitHub Copilot: # Corrigindo a Inconsistência entre JwtTokenProvider e AuthService
+
+O problema é que você está chamando o método 
+
+generateAccessToken(userDetails, userDetails.getId())
+
+ no 
+
+AuthService
+
+, mas na sua classe 
+
+JwtTokenProvider
+
+ esse método não existe. Em vez disso, existe apenas o método 
+
+generateJwtToken(Authentication)
+
+.
+
+Vamos fazer as alterações necessárias:
+
+## 1. Opção: Adicionar o método 
+
+generateAccessToken
+
+ ao 
+
+JwtTokenProvider
+
+
+
+```java
+
+
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtTokenProvider {
+    private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        return Jwts.builder()
+                .setSubject(userPrincipal.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userPrincipal.getId())
+                .compact();
+    }
+    
+    // Adicione este novo método
+    public String generateAccessToken(UserDetails userDetails, Long userId) {
+        return Jwts.builder()
+                .setSubject(userDetails.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userId)
+                .compact();
+    }
+
+    private Key key() {
+        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parserBuilder().setSigningKey(key()).build().parseClaimsJws(authToken);
+            return true;
+        } catch (MalformedJwtException e) {
+            logger.error("Token JWT inválido: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("Token JWT expirado: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("Token JWT não suportado: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("String de claim JWT vazia: {}", e.getMessage());
+        }
+
+        return false;
+    }
+}
+```
+
+## 2. Alternativa: Modificar o 
+
+AuthService
+
+ para usar o método existente
+
+Se você preferir não modificar o 
+
+JwtTokenProvider
+
+, pode alterar o 
+
+AuthService
+
+ para usar o método existente:
+
+```java
+
+
+/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/service/AuthService.java
+// Modificar este trecho no método login():
+
+public TokenResponseDTO login(LoginRequestDTO loginRequest) {
+    Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+    
+    // Usar diretamente o método generateJwtToken com a autenticação
+    String accessToken = tokenProvider.generateJwtToken(authentication);
+    
+    // O resto permanece igual
+    AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+    RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+    return TokenResponseDTO.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken.getToken())
+            .tokenType("Bearer")
+            .build();
+}
+
+// E também modificar no método refreshToken():
+
+public TokenResponseDTO refreshToken(String refreshTokenStr) {
+    return refreshTokenService.findByToken(refreshTokenStr)
+            .map(token -> refreshTokenService.verifyExpiration(token))
+            .map(refreshToken -> {
+                User user = refreshToken.getUser();
+                
+                // Criar a autenticação para passar para o método generateJwtToken
+                AuthenticatedUser userDetails = new AuthenticatedUser(
+                        user.getId(),
+                        user.getEmail(),
+                        user.getPassword(),
+                        java.util.Collections.emptyList()
+                );
+                
+                // Criar um objeto Authentication simulado
+                Authentication authentication = new UsernamePasswordAuthenticationToken(
+                        userDetails, null, userDetails.getAuthorities());
+                
+                String accessToken = tokenProvider.generateJwtToken(authentication);
+                
+                return TokenResponseDTO.builder()
+                        .accessToken(accessToken)
+                        .refreshToken(refreshTokenStr)
+                        .tokenType("Bearer")
+                        .build();
+            })
+            .orElseThrow(() -> new TokenRefreshException(refreshTokenStr, 
+                    "Refresh token não encontrado na base de dados"));
+}
+```
+
+## 3. Implementar o método `generateTokensForNewUser` que você precisará posteriormente
+
+```java
+
+
+// Adicione este método ao AuthService
+
+public TokenResponseDTO generateTokensForNewUser(User user) {
+    // Criar um userDetails para o novo usuário
+    AuthenticatedUser userDetails = new AuthenticatedUser(
+            user.getId(),
+            user.getEmail(),
+            user.getPassword(),
+            java.util.Collections.emptyList()
+    );
+    
+    // Criar uma autenticação simulada
+    Authentication authentication = new UsernamePasswordAuthenticationToken(
+            userDetails, null, userDetails.getAuthorities());
+    
+    // Gerar access token
+    String accessToken = tokenProvider.generateJwtToken(authentication);
+    
+    // Gerar refresh token
+    RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
+    
+    return TokenResponseDTO.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken.getToken())
+            .tokenType("Bearer")
+            .build();
+}
+```
+
+## Recomendação
+
+A primeira opção (adicionar o método 
+
+generateAccessToken
+
+ ao 
+
+JwtTokenProvider
+
+) é a mais limpa e recomendada, pois:
+
+1. Mantém a consistência da sua base de código atual
+2. Evita a necessidade de criar objetos de autenticação artificiais
+3. É mais fácil de entender e manter
+
+Esta solução resolverá tanto o problema atual quanto facilitará a implementação de funcionalidades adicionais, como a geração de tokens para usuários recém-registrados.
+
+Código semelhante encontrado com 1 tipo de licença
+
+Victor476: ele está com um problema com essa linha
+
+Optional<User> findByEmail(String email);
+Optional cannot be resolved to a typeJava(16777218)
+
+
+GitHub Copilot: # Corrigindo o erro de importação do Optional
+
+O erro "Optional cannot be resolved to a type" ocorre porque você não importou a classe `java.util.Optional` no seu arquivo 
+
+UserRepository.java
+
+. Vamos corrigir isso:
+
+```java
+
+
+package com.fairpay.repository;
+
+import com.fairpay.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional; // Adicione esta importação
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);
+    boolean existsByEmail(String email);
+}
+```
+
+## Dicas adicionais:
+
+1. Na maioria dos IDEs modernos como IntelliJ IDEA ou VS Code, você pode usar atalhos para importar classes automaticamente:
+   - No VS Code: `Ctrl+Shift+I` ou `Ctrl+.` (Windows) ou `Cmd+.` (Mac)
+   - No IntelliJ IDEA: `Alt+Enter` (Windows) ou `Option+Enter` (Mac)
+
+2. Se você estiver usando o Eclipse, pode usar:
+   - `Ctrl+Shift+O` para organizar importações
+   - Ou clique no erro com o botão direito e selecione "Fix project setup..."
+
+3. Algumas IDEs têm configurações para importar automaticamente classes necessárias, o que pode poupar tempo ao digitar.
+
+O importante é ter o pacote `java.util.Optional` importado corretamente para resolver esse erro específico.
+
+Victor476: ele está com problema com essa linha
+
+logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+
+The method error(Object, Throwable) in the type Log is not applicable for the arguments (String, String)Java(67108979)
+void org.apache.commons.logging.Log.error(Object message, Throwable t)
+Logs an error with error log level.
+
+Parameters:
+
+message log this message
+
+t log this cause
+
+GitHub Copilot: 
+
+Victor476: ele está com problema com essa linha
+
+logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+
+The method error(Object, Throwable) in the type Log is not applicable for the arguments (String, String)Java(67108979)
+void org.apache.commons.logging.Log.error(Object message, Throwable t)
+Logs an error with error log level.
+
+Parameters:
+
+message log this message
+
+t log this cause
+
+GitHub Copilot: # Corrigindo o problema de logger no Spring
+
+O erro que você está enfrentando ocorre porque o 
+
+logger
+
+ que você está usando é do tipo `org.apache.commons.logging.Log` e não do tipo `org.slf4j.Logger`. O método 
+
+error
+
+ do Commons Logging tem uma assinatura diferente do SLF4J.
+
+Existem duas soluções possíveis:
+
+## Solução 1: Mudar o tipo de logger
+
+```java
+// No topo da classe, mude a importação e a declaração:
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+// Altere a declaração do logger:
+private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
+```
+
+## Solução 2: Ajustar a chamada do método error
+
+Se você não quiser mudar o tipo de logger, pode ajustar a chamada:
+
+```java
+// Em vez de:
+logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+
+// Use:
+logger.error("Não foi possível autenticar o usuário: " + e.getMessage(), e);
+```
+
+## Para o arquivo 
+
+JwtAuthenticationFilter.java
+
+
+
+```java
+
+
+package com.fairpay.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    
+    // Corrigir a declaração do logger
+    private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+    
+    @Autowired
+    private JwtTokenProvider tokenProvider;
+    
+    @Autowired
+    private UserDetailsService userDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        
+        try {
+            String token = getTokenFromRequest(request);
+            
+            if (StringUtils.hasText(token) && tokenProvider.validateJwtToken(token)) {
+                String username = tokenProvider.getUserNameFromJwtToken(token);
+                
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication = 
+                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            // A chamada do logger agora funcionará corretamente
+            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private String getTokenFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        
+        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        
+        return null;
+    }
+}
+```
+
+## Para o arquivo JwtTokenProvider.java
+
+```java
+// filepath: /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/security/JwtTokenProvider.java
+package com.fairpay.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+
+@Component
+public class JwtTokenProvider {
+    // Garantir que estamos usando o logger SLF4J
+    private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
+
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+
+    public String generateJwtToken(Authentication authentication) {
+        AuthenticatedUser userPrincipal = (AuthenticatedUser) authentication.getPrincipal();
+
+        return Jwts.builder()
+                .setSubject(userPrincipal.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userPrincipal.getId())
+                .compact();
+    }
+    
+    public String generateAccessToken(UserDetails userDetails, Long userId) {
+        return Jwts.builder()
+                .setSubject(userDetails.getUsername())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key(), SignatureAlgorithm.HS256)
+                .claim("userId", userId)
+                .compact();
+    }
+
+    private Key key() {
+        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+    }
+
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    
+    public Long getUserIdFromJwtToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key())
+                .build()
+                .parseClaimsJws(token)
+                .getBody()
+                .get("userId", Long.class);
+    }
+
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parserBuilder().setSigningKey(key()).build().parseClaimsJws(authToken);
+            return true;
+        } catch (MalformedJwtException e) {
+            logger.error("Token JWT inválido: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("Token JWT expirado: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("Token JWT não suportado: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("String de claim JWT vazia: {}", e.getMessage());
+        }
+
+        return false;
+    }
+}
+```
+
+## Observação importante
+
+O problema ocorre porque há uma confusão entre a API de logging do Commons Logging e a do SLF4J. O Spring Framework tradicionalmente usava Commons Logging, mas a maioria dos projetos modernos usa SLF4J.
+
+- **Commons Logging**: 
+
+error(Object message, Throwable t)
+
+
+- **SLF4J**: 
+
+error(String format, Object... arguments)
+
+ e também tem 
+
+error(String msg, Throwable t)
+
+
+
+O método 
+
+error
+
+ com formatação de string (usando `{}`) é específico do SLF4J, por isso quando você usa o Commons Logging com essa sintaxe, o compilador reclama.
+
+Certifique-se de estar usando consistentemente o mesmo tipo de logger em todo o seu projeto para evitar confusão.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: qual é o comando pra executar a aplicação mesmo?
+
+GitHub Copilot: # Executando a Aplicação Spring Boot
+
+Para executar sua aplicação Spring Boot, existem várias maneiras:
+
+## 1. Usando Maven
+
+Se você está na pasta raiz do projeto (onde está o [`pom.xml`](pom.xml )), execute:
+
+```bash
+./mvnw spring-boot:run
+```
+
+Ou se estiver usando o Maven instalado globalmente:
+
+```bash
+mvn spring-boot:run
+```
+
+## 2. Usando uma IDE
+
+### IntelliJ IDEA
+- Abra o projeto no IntelliJ IDEA
+- Encontre a classe principal com anotação `@SpringBootApplication` (geralmente chamada `FairpayBackendApplication.java`)
+- Clique com o botão direito e selecione "Run FairpayBackendApplication"
+
+### Eclipse ou Spring Tool Suite
+- Abra o projeto no Eclipse
+- Clique com o botão direito no projeto
+- Escolha "Run As" > "Spring Boot App"
+
+### VS Code
+- Com a extensão Spring Boot instalada
+- Clique no ícone de execução no canto esquerdo
+- Selecione a configuração Spring Boot
+
+## 3. Usando o Jar compilado
+
+Primeiro compile o projeto:
+
+```bash
+./mvnw clean package
+```
+
+Depois execute o JAR gerado:
+
+```bash
+java -jar target/fairpay-backend-0.0.1-SNAPSHOT.jar
+```
+
+O nome exato do JAR dependerá do que está configurado no [`pom.xml`](pom.xml ).
+
+## 4. Verificando o funcionamento
+
+Após iniciar a aplicação, você pode verificar se está funcionando acessando:
+
+```
+http://localhost:8090/
+```
+
+Ou qualquer outro endpoint que você tenha configurado, como:
+
+```
+http://localhost:8090/api/auth/login
+```
+
+## Problemas comuns e soluções
+
+- **Porta já em uso**: Se a porta 8090 já estiver em uso, você pode mudar a porta:
+  ```
+  java -jar target/fairpay-backend-0.0.1-SNAPSHOT.jar --server.port=8091
+  ```
+
+- **Erro de conexão com banco de dados**: Verifique se o PostgreSQL está rodando e se as credenciais no `application.properties` estão corretas.
+
+- **Erro de compilação**: Execute `./mvnw clean install` para ver detalhes do erro.
+
+A partir da sua estrutura de projeto, o comando mais direto seria:
+
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw spring-boot:run
+```
+
+Victor476: ocorreu esse erro aqui
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-06-16T18:29:27.731-03:00 ERROR 10240 --- [fairpay] [  restartedMain] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+The bean 'authenticationProvider', defined in class path resource [com/fairpay/security/WebSecurityConfig.class], could not be registered. A bean with that name has already been defined in class path resource [com/fairpay/config/SecurityConfig.class] and overriding is disabled.
+
+Action:
+
+Consider renaming one of the beans or enabling overriding by setting spring.main.allow-bean-definition-overriding=true
+
+GitHub Copilot: # Resolvendo o Conflito de Beans de Autenticação
+
+O erro indica que você tem dois beans com o mesmo nome (`authenticationProvider`) definidos em dois arquivos diferentes:
+1. Um em `com/fairpay/security/WebSecurityConfig.class`
+2. Outro em `com/fairpay/config/SecurityConfig.class`
+
+Isso acontece quando há duas configurações de segurança que tentam definir o mesmo componente.
+
+Existem três maneiras de resolver este problema:
+
+## Solução 1: Permitir sobrescrita de beans (rápida, mas não recomendada)
+
+Adicione esta linha ao seu arquivo `application.properties`:
+
+```properties
+
+
+# Permitir sobrescrita de beans
+spring.main.allow-bean-definition-overriding=true
+```
+
+Esta solução é rápida, mas não é recomendada para produção pois pode mascarar problemas de configuração.
+
+## Solução 2: Remover uma das configurações (recomendada)
+
+Uma boa prática seria manter apenas uma classe de configuração de segurança. Como você tem duas:
+
+1. `WebSecurityConfig` em `com/fairpay/security/`
+2. `SecurityConfig` em `com/fairpay/config/`
+
+Você deve escolher uma delas e remover ou desativar a outra.
+
+### Opção A: Manter o WebSecurityConfig e remover o SecurityConfig
+
+```java
+
+
+// Adicione esta anotação para desativar esta configuração
+//@Configuration
+//@EnableWebSecurity
+public class SecurityConfig {
+    // seu código aqui
+}
+```
+
+### Opção B: Manter o SecurityConfig e remover o WebSecurityConfig
+
+```java
+
+
+// Adicione esta anotação para desativar esta configuração
+//@Configuration
+//@EnableWebSecurity
+public class WebSecurityConfig {
+    // seu código aqui
+}
+```
+
+## Solução 3: Renomear um dos beans (mais estruturada)
+
+Você pode manter ambas as classes, mas renomear o bean em uma delas:
+
+```java
+
+
+@Bean(name = "securityAuthProvider") // Mudar nome do bean
+public DaoAuthenticationProvider authenticationProvider() {
+    // implementação
+}
+```
+
+## Solução 4: Consolidar as configurações em um único arquivo
+
+A melhor solução a longo prazo é consolidar suas configurações de segurança em um único arquivo:
+
+1. Copie as partes importantes de ambos os arquivos para um único arquivo de configuração
+2. Certifique-se de que não há sobreposição de funcionalidades
+3. Remova ou desative completamente o outro arquivo
+
+## Qual solução escolher?
+
+A melhor abordagem é a Solução 2 ou 4:
+
+- Se as configurações forem muito diferentes e complementares, use a Solução 3
+- Se uma configuração substituir completamente a outra, use a Solução 2
+- Se ambas tiverem partes importantes que devem ser combinadas, use a Solução 4
+
+Para resolver rapidamente, eu sugiro a **Solução 2** - verifique qual das configurações está mais completa e mantém a funcionalidade desejada, e depois desative a outra. 
+
+Depois, quando tiver tempo, considere consolidar tudo em um único arquivo de configuração bem organizado, seguindo a Solução 4.
+
+Victor476: o que tirar o bean iria alterar nas duas?
+
+GitHub Copilot: # Comparação entre SecurityConfig e WebSecurityConfig
+
+Analisando as duas classes de configuração de segurança, vamos ver o que seria afetado se desativarmos um dos beans:
+
+## Comparação de funcionalidades:
+
+### 1. Beans presentes em ambas as classes:
+- 
+
+authenticationProvider
+
+ (causa do conflito)
+- 
+
+authenticationManager
+
+
+- 
+
+passwordEncoder
+
+
+- 
+
+SecurityFilterChain
+
+ (configuração HTTP)
+
+### 2. Funcionalidades exclusivas em WebSecurityConfig:
+- `@EnableMethodSecurity` (permite usar anotações como `@PreAuthorize`)
+- `AuthEntryPointJwt` (tratamento personalizado de erros de autenticação)
+- `AuthTokenFilter` (filtro JWT personalizado)
+
+### 3. Diferenças na configuração HTTP:
+- Ambos desativam CSRF
+- WebSecurityConfig configura tratamento de exceção com 
+
+unauthorizedHandler
+
+
+- WebSecurityConfig tem uma configuração mais específica para endpoints
+
+## O que aconteceria se desativarmos:
+
+### Se desativarmos SecurityConfig:
+- Você manteria toda a configuração de segurança JWT
+- Manteria o tratamento personalizado de exceções
+- Manteria o filtro JWT
+- Manteria a anotação `@EnableMethodSecurity`
+
+### Se desativarmos WebSecurityConfig:
+- Você perderia o tratamento personalizado de exceções
+- Perderia o filtro JWT
+- Perderia a anotação `@EnableMethodSecurity`
+- A autenticação JWT basicamente não funcionaria
+
+## Recomendação:
+
+**Desative o SecurityConfig e mantenha o WebSecurityConfig**, pois:
+
+1. WebSecurityConfig é mais completo
+2. WebSecurityConfig contém a configuração JWT necessária
+3. WebSecurityConfig tem tratamento de erro personalizado
+4. WebSecurityConfig tem o filtro JWT que é essencial para autenticação baseada em token
+
+## Como desativar:
+
+```java
+
+
+package com.fairpay.config;
+
+// import statements...
+
+// Comentar ou remover estas anotações
+// @Configuration
+// @EnableWebSecurity
+public class SecurityConfig {
+    // resto do código...
+}
+```
+
+Ou, se preferir manter o arquivo para referência futura, você pode renomear os beans:
+
+```java
+
+
+package com.fairpay.config;
+
+// import statements...
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+    
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthFilter;
+    
+    @Bean(name = "basicAuthProvider") // Renomear para evitar conflito
+    public DaoAuthenticationProvider authenticationProvider() {
+        // código...
+    }
+
+    @Bean(name = "basicAuthManager") // Renomear para evitar conflito  
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        // código...
+    }
+
+    @Bean(name = "basicPasswordEncoder") // Renomear para evitar conflito
+    public PasswordEncoder passwordEncoder() {
+        // código...
+    }
+    
+    // Renomear para evitar conflito
+    @Bean(name = "basicSecurityFilterChain")  
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // código...
+    }
+}
+```
+
+Nesse caso, você precisa garantir que em todo o seu código que depende desses beans, você está referenciando apenas os beans corretos (os do WebSecurityConfig).
+
+**É melhor simplesmente desativar o SecurityConfig** para evitar complicações e manter apenas uma fonte de configuração de segurança.
+
+Victor476: o que seria esse erro?
+
+GitHub Copilot: # Erro de conflito entre SecurityConfig e WebSecurityConfig
+
+O erro ocorre porque você tem duas configurações de segurança ativas (`@Configuration` + `@EnableWebSecurity`) com beans de mesmo nome, especificamente:
+
+1. Ambas as classes definem um bean chamado 
+
+authenticationProvider()
+
+
+2. Ambas definem 
+
+filterChain(HttpSecurity http)
+
+
+3. Ambas definem 
+
+passwordEncoder()
+
+
+4. Ambas definem 
+
+authenticationManager(AuthenticationConfiguration)
+
+
+
+O Spring está detectando essa duplicação e como o Spring não permite sobrescrever beans por padrão, ele gera um erro.
+
+## A solução é desativar a classe SecurityConfig:
+
+```java
+
+
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+// import org.springframework.context.annotation.Bean;
+// import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+// import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+// Comentar ou remover estas anotações
+// @Configuration
+// @EnableWebSecurity
+public class SecurityConfig {
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+    
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthFilter;
+    
+    // @Bean - remover ou comentar esta anotação
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        
+        return authProvider;
+    }
+
+    // @Bean - remover ou comentar esta anotação
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    // @Bean - remover ou comentar esta anotação
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    
+    // @Bean - remover ou comentar esta anotação
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh").permitAll()
+                .requestMatchers("/api/public/**").permitAll()
+                .anyRequest().authenticated()
+            );
+            
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+```
+
+Com esta alteração, você basicamente desativa toda a classe 
+
+SecurityConfig
+
+ e mantém apenas a classe 
+
+WebSecurityConfig
+
+ responsável pela segurança da aplicação.
+
+## Por que o WebSecurityConfig é melhor para manter:
+
+1. Ele usa a anotação `@EnableMethodSecurity`, que permite usar anotações de segurança em métodos como `@PreAuthorize`
+2. Ele configura um handler para tratamento de erros com 
+
+unauthorizedHandler
+
+
+3. Ele utiliza explicitamente um filtro JWT específico 
+
+authenticationJwtTokenFilter()
+
+
+4. Ele está no pacote 
+
+com.fairpay.security
+
+, que é mais apropriado semanticamente
+
+Se você quiser manter ambas as configurações (o que não é recomendado), precisaria de uma solução mais complexa para resolver a sobrescrita de beans. A maneira mais limpa é simplesmente desativar a classe 
+
+SecurityConfig
+
+ como mostrado acima.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: o que seria esse erro?
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-06-16T18:35:11.966-03:00 ERROR 12049 --- [fairpay] [  restartedMain] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+The bean 'authenticationManager', defined in class path resource [com/fairpay/security/WebSecurityConfig.class], could not be registered. A bean with that name has already been defined in class path resource [com/fairpay/config/SecurityConfig.class] and overriding is disabled.
+
+Action:
+
+Consider renaming one of the beans or enabling overriding by setting spring.main.allow-bean-definition-overriding=true
+
+GitHub Copilot: # Resolvendo o conflito de beans em SecurityConfig e WebSecurityConfig
+
+O erro persiste porque você ainda tem a anotação `@Bean` nos métodos de ambas as classes. Mesmo que tenha retirado as anotações `@Bean` do 
+
+authenticationProvider()
+
+ no SecurityConfig, ainda há outros beans conflitantes como o 
+
+authenticationManager
+
+.
+
+## Solução completa para desativar o SecurityConfig:
+
+```java
+
+
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+// Remova ou comente estas importações de anotações 
+// import org.springframework.context.annotation.Bean;
+// import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+// import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+// Remova ou comente estas duas anotações
+// @Configuration
+// @EnableWebSecurity
+public class SecurityConfig {
+
+    @Autowired
+    private UserDetailsService userDetailsService;
+    
+    @Autowired
+    private JwtAuthenticationFilter jwtAuthFilter;
+    
+    // Remova ou comente estas anotações
+    // @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        
+        return authProvider;
+    }
+
+    // Remova ou comente esta anotação 
+    // @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    // Remova ou comente esta anotação
+    // @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    
+    // Remova ou comente esta anotação
+    // @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh").permitAll()
+                .requestMatchers("/api/public/**").permitAll()
+                .anyRequest().authenticated()
+            );
+            
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+```
+
+## Solução alternativa: renomear a classe para referência futura
+
+Uma alternativa é renomear o arquivo para indicar que não deve ser usado:
+
+```bash
+mv /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/config/SecurityConfig.java /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/config/SecurityConfig.java.bak
+```
+
+## Solução mais rápida: habilitar sobrescrita de beans
+
+Se você estiver com pressa, adicione esta linha ao seu `application.properties`:
+
+```properties
+
+
+# Permitir sobrescrita de beans
+spring.main.allow-bean-definition-overriding=true
+```
+
+Esta é a solução mais rápida, mas não a mais limpa, pois esconde o problema em vez de resolvê-lo corretamente.
+
+## Importante: verificar outras dependências
+
+Se seu código em outros lugares faz referência direta à classe 
+
+SecurityConfig
+
+, você precisará atualizar essas referências para apontar para a 
+
+WebSecurityConfig
+
+. Alguns possíveis pontos a verificar:
+
+- Classes que injetam 
+
+SecurityConfig
+
+ diretamente
+- Testes que referenciam 
+
+SecurityConfig
+
+
+
+## Resumo:
+
+1. Desative completamente 
+
+SecurityConfig
+
+ removendo/comentando todas as anotações `@Bean`, `@Configuration` e `@EnableWebSecurity`.
+2. Mantenha 
+
+WebSecurityConfig
+
+ como está - ele será a única configuração de segurança ativa.
+3. Se necessário, atualize outras referências à 
+
+SecurityConfig
+
+ em seu código.
+
+Esta abordagem garante que não haja conflitos de beans e que sua configuração de segurança seja clara e consistente.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-06-16T18:42:39.970-03:00 ERROR 14795 --- [fairpay] [  restartedMain] o.s.boot.SpringApplication               : Application run failed
+
+org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'authController': Unsatisfied dependency expressed through field 'authService': Error creating bean with name 'authService': Unsatisfied dependency expressed through field 'refreshTokenService': Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:788) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.instantiateSingleton(DefaultListableBeanFactory.java:1155) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingleton(DefaultListableBeanFactory.java:1121) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingletons(DefaultListableBeanFactory.java:1056) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:987) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:627) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:146) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:752) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:439) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:318) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1361) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1350) ~[spring-boot-3.4.4.jar:3.4.4]
+        at com.fairpay.FairpayBackendApplication.main(FairpayBackendApplication.java:10) ~[classes/:na]
+        at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+        at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+        at org.springframework.boot.devtools.restart.RestartLauncher.run(RestartLauncher.java:50) ~[spring-boot-devtools-3.4.4.jar:3.4.4]
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'authService': Unsatisfied dependency expressed through field 'refreshTokenService': Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:788) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1609) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 25 common frames omitted
+Caused by: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:515) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1609) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 38 common frames omitted
+Caused by: org.springframework.util.PlaceholderResolutionException: Could not resolve placeholder 'app.jwt.refresh-expiration' in value "${app.jwt.refresh-expiration}"
+        at org.springframework.util.PlaceholderResolutionException.withValue(PlaceholderResolutionException.java:81) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser$ParsedValue.resolve(PlaceholderParser.java:423) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser.replacePlaceholders(PlaceholderParser.java:128) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.parseStringValue(PropertyPlaceholderHelper.java:118) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.replacePlaceholders(PropertyPlaceholderHelper.java:114) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.doResolvePlaceholders(AbstractPropertyResolver.java:255) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.resolveRequiredPlaceholders(AbstractPropertyResolver.java:226) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.PropertySourcesPlaceholderConfigurer.lambda$processProperties$0(PropertySourcesPlaceholderConfigurer.java:201) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.resolveEmbeddedValue(AbstractBeanFactory.java:971) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1577) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 48 common frames omitted
+
+GitHub Copilot: # Corrigindo o erro de propriedade não encontrada na classe RefreshTokenService
+
+O erro ocorre porque sua classe `RefreshTokenService` está tentando injetar uma propriedade chamada `app.jwt.refresh-expiration`, mas no seu 
+
+application.properties
+
+ você definiu a propriedade como `jwt.refreshExpiration` (sem o prefixo `app` e com uma convenção de nomenclatura diferente).
+
+## Solução:
+
+Você precisa corrigir o nome da propriedade em um dos dois lugares:
+
+### Opção 1: Ajustar o RefreshTokenService para usar o nome correto
+
+```java
+
+
+package com.fairpay.service;
+
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class RefreshTokenService {
+    
+    // Mudar para corresponder ao nome no application.properties
+    @Value("${jwt.refreshExpiration}")
+    private Long refreshTokenDuration;
+    
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    // Resto do código...
+}
+```
+
+### Opção 2: Adicionar a propriedade no formato que o serviço espera
+
+Você também pode adicionar a propriedade no formato esperado no 
+
+application.properties
+
+:
+
+```properties
+
+
+# Adicionar a propriedade no formato esperado pelo RefreshTokenService
+app.jwt.refresh-expiration=86400000
+
+# Manter a propriedade existente para compatibilidade
+jwt.refreshExpiration=86400000
+```
+
+### Opção 3 (recomendada): Padronizar os nomes de propriedades
+
+É melhor padronizar todos os nomes de propriedades para usar o mesmo formato:
+
+1. No 
+
+application.properties
+
+:
+
+```properties
+
+
+# JWT Configuration (padronizado)
+app.jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+app.jwt.expiration=900000
+app.jwt.refresh-expiration=86400000
+
+# Manter as propriedades antigas para compatibilidade durante a transição
+jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+jwt.expiration=900000
+jwt.refreshExpiration=86400000
+```
+
+2. Em seguida, atualize gradualmente todas as classes que usam essas propriedades para usar o formato padronizado `app.jwt.*`.
+
+## Na prática, para resolver rapidamente:
+
+A solução mais rápida é a Opção 2: apenas adicione a propriedade que está faltando ao seu arquivo 
+
+application.properties
+
+:
+
+```properties
+
+
+# Adicionar esta linha
+app.jwt.refresh-expiration=86400000
+```
+
+Isso resolverá o erro imediato e permitirá que sua aplicação inicie.
+
+## Recomendação para futuro:
+
+É melhor padronizar todos os nomes de propriedades para evitar confusão. Escolha um formato (por exemplo, `app.jwt.*`) e atualize todas as referências em seu código para seguir esse padrão.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: como eu texto com o postman mesmo?
+
+GitHub Copilot: # Testando a API com o Postman
+
+Vamos configurar o Postman para testar sua API de autenticação:
+
+## 1. Iniciar o Postman
+Abra o aplicativo Postman ou use a versão web em [postman.com](https://www.postman.com/).
+
+## 2. Criar uma Coleção
+Crie uma nova coleção chamada "FairPay API":
+- Clique no botão "+ New" ou "Create Collection"
+- Nomeie como "FairPay API"
+
+## 3. Configurar Requisições para Testes
+
+### Registro de Usuário
+- **Método**: POST
+- **URL**: http://localhost:8090/api/auth/register
+- **Headers**: 
+  - Content-Type: application/json
+- **Body** (raw - JSON):
+```json
+{
+  "name": "Usuário Teste",
+  "email": "teste@example.com",
+  "password": "senha123",
+  "confirmPassword": "senha123"
+}
+```
+
+### Login
+- **Método**: POST
+- **URL**: http://localhost:8090/api/auth/login
+- **Headers**: 
+  - Content-Type: application/json
+- **Body** (raw - JSON):
+```json
+{
+  "email": "teste@example.com",
+  "password": "senha123"
+}
+```
+
+### Atualizar Token
+- **Método**: POST
+- **URL**: http://localhost:8090/api/auth/refresh
+- **Headers**: 
+  - Content-Type: application/json
+- **Body** (raw - JSON):
+```json
+{
+  "refreshToken": "seu-refresh-token-aqui"
+}
+```
+
+### Endpoint Protegido (exemplo)
+- **Método**: GET
+- **URL**: http://localhost:8090/api/groups
+- **Headers**: 
+  - Authorization: Bearer seu-access-token-aqui
+
+### Logout
+- **Método**: POST
+- **URL**: http://localhost:8090/api/auth/logout
+- **Headers**: 
+  - Authorization: Bearer seu-access-token-aqui
+
+## 4. Fluxo de Teste
+
+1. **Registrar um usuário**:
+   - Execute a requisição de registro
+   - A resposta deve conter `"success": true` e informações do usuário registrado
+
+2. **Login**:
+   - Execute a requisição de login
+   - Salve o `accessToken` e `refreshToken` retornados
+
+3. **Acessar endpoint protegido**:
+   - Substitua `seu-access-token-aqui` pelo token recebido no login
+   - Execute a requisição
+   - Verifique se recebe resposta 200 OK
+
+4. **Testar refresh token**:
+   - Substitua `seu-refresh-token-aqui` pelo refresh token recebido
+   - Execute a requisição
+   - Obtenha um novo access token
+
+5. **Logout**:
+   - Substitua `seu-access-token-aqui` pelo access token atual
+   - Execute a requisição
+   - Deve receber `"success": true`
+
+## 5. Usando Variáveis de Ambiente (avançado)
+
+Para facilitar os testes, você pode usar variáveis de ambiente no Postman:
+
+1. Crie um ambiente:
+   - Clique no ícone de engrenagem/roda dentada
+   - "Add environment"
+   - Nomeie como "FairPay Local"
+
+2. Adicione variáveis:
+   - `baseUrl`: http://localhost:8090
+   - `accessToken`: deixe vazio inicialmente
+   - `refreshToken`: deixe vazio inicialmente
+
+3. Atualize suas requisições:
+   - URL: `{{baseUrl}}/api/auth/login`
+   - Header Authorization: `Bearer {{accessToken}}`
+
+4. Script de teste para salvar tokens automaticamente:
+   - Na requisição de login, na aba "Tests":
+   ```javascript
+   if (pm.response.code === 200) {
+       var jsonData = pm.response.json();
+       pm.environment.set("accessToken", jsonData.accessToken);
+       pm.environment.set("refreshToken", jsonData.refreshToken);
+   }
+   ```
+
+## Comandos para iniciar seu servidor:
+
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw spring-boot:run
+```
+
+Certifique-se de que o servidor está rodando antes de testar no Postman.
+
+## Dicas de Depuração:
+
+1. Verifique os logs do servidor para erros
+2. Use o console do navegador para inspecionar respostas
+3. No Postman, a aba "Console" mostra todas as requisições feitas
+4. Verifique se o banco de dados PostgreSQL está rodando e acessível
+
+Espero que isso ajude a testar sua API! Se encontrar erros específicos, você pode ajustar as requisições ou verificar o código para depuração.
+
+Victor476: ocorreu o seguinte erro ao tentar fazer login
+
+{
+    "path": "/error",
+    "error": "Não autorizado",
+    "message": "Full authentication is required to access this resource",
+    "status": 401
+}
+
+GitHub Copilot: # Resolvendo o erro de autenticação no login
+
+O erro "Full authentication is required to access this resource" com status 401 (Não autorizado) indica que o Spring Security está bloqueando o acesso ao endpoint `/api/auth/login` porque ele está configurado como um endpoint protegido, quando na verdade ele deveria ser público.
+
+Vamos resolver esse problema:
+
+## 1. Verificar a configuração de segurança
+
+A classe `WebSecurityConfig` precisa configurar corretamente os endpoints públicos:
+
+```java
+
+
+package com.fairpay.security;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class WebSecurityConfig {
+    
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+    
+    @Autowired
+    private AuthEntryPointJwt unauthorizedHandler;
+    
+    @Bean
+    public AuthTokenFilter authenticationJwtTokenFilter() {
+        return new AuthTokenFilter();
+    }
+    
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        
+        authProvider.setUserDetailsService(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        
+        return authProvider;
+    }
+    
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+    
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())
+            .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                // Certifique-se de que estas rotas estão permitidas
+                .requestMatchers("/api/auth/**").permitAll()  // Permite todas as rotas de autenticação
+                .requestMatchers("/api/public/**").permitAll()  // Outras rotas públicas
+                .requestMatchers("/error").permitAll()  // Página de erro
+                // Se precisar de mais rotas públicas, adicione aqui
+                .anyRequest().authenticated()
+            );
+        
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+        
+        return http.build();
+    }
+}
+```
+
+## 2. Verificar o AuthEntryPointJwt
+
+Se você tiver uma classe `AuthEntryPointJwt`, certifique-se de que ela está implementada corretamente:
+
+```java
+
+
+package com.fairpay.security;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+
+@Component
+public class AuthEntryPointJwt implements AuthenticationEntryPoint {
+    
+    private static final Logger logger = LoggerFactory.getLogger(AuthEntryPointJwt.class);
+    
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response,
+                         AuthenticationException authException) throws IOException, ServletException {
+        logger.error("Erro de autorização: {}", authException.getMessage());
+        
+        response.setContentType("application/json");
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.getWriter().write("{\"error\": \"Não autorizado\", \"message\": \"" 
+                + authException.getMessage() + "\", \"status\": 401, \"path\": \"" 
+                + request.getServletPath() + "\"}");
+    }
+}
+```
+
+## 3. Verificar a rota no controller
+
+Certifique-se de que o controller está mapeado corretamente:
+
+```java
+
+
+@RestController
+@RequestMapping("/api/auth")  // Verifique se o caminho está correto
+public class AuthController {
+    // ...
+    
+    @PostMapping("/login")  // Verifique se o mapeamento está correto
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        // ...
+    }
+    
+    // ...
+}
+```
+
+## 4. Debug da autenticação
+
+Se ainda tiver problemas, adicione logs para depuração:
+
+```java
+
+
+@Override
+protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+        throws ServletException, IOException {
+    
+    logger.info("URI da requisição: {}", request.getRequestURI());
+    
+    // Resto do código...
+}
+```
+
+## 5. Verificar se os controladores estão no local correto
+
+O Spring Boot escaneia automaticamente componentes no pacote principal e subpacotes. Certifique-se de que seu controller está em um pacote que o Spring possa encontrar.
+
+## 6. Testando com Postman
+
+Para testar após as correções:
+
+1. Reinicie seu servidor
+2. Verifique os logs para confirmar que não há erros de inicialização
+3. Faça uma requisição de login:
+   - URL: `http://localhost:8090/api/auth/login`
+   - Método: POST
+   - Content-Type: application/json
+   - Body:
+   ```json
+   {
+     "email": "seu-email@exemplo.com",
+     "password": "sua-senha"
+   }
+   ```
+
+Se tudo estiver configurado corretamente, você deve receber uma resposta 200 OK com um token de autenticação.
+
+## Checklist final:
+
+- [ ] Endpoints `/api/auth/**` permitidos no WebSecurityConfig
+- [ ] Controller mapeado corretamente com `/api/auth/login`
+- [ ] Implementação adequada de UserDetailsService
+- [ ] Método de login recebe um DTO válido
+- [ ] Não há erros nos logs do servidor
+
+Com essas correções, o sistema de login deve funcionar corretamente.
+
+Código semelhante encontrado com 4 tipos de licença
+
+Victor476: o que poderia causar isso baseado nesses arquivos?
+
+GitHub Copilot: # Análise do Problema de Autenticação na API do FairPay
+
+Analisando seus arquivos e o erro "Full authentication is required to access this resource" (status 401), identifiquei alguns possíveis problemas:
+
+## 1. Configuração Incorreta de Propriedade JWT
+
+No 
+
+RefreshTokenService.java
+
+, você está usando:
+```java
+@Value("${jwt.refresh-expiration}")
+private Long refreshTokenDurationMs;
+```
+
+Mas no seu `application.properties`, você definiu:
+```properties
+jwt.refreshExpiration=86400000
+```
+
+Observe a diferença: 
+
+jwt.refresh-expiration
+
+ vs 
+
+jwt.refreshExpiration
+
+ (com hífen vs camelCase). Esse é um erro na configuração.
+
+## 2. Conflito entre Filtros JWT
+
+Você tem dois filtros para JWT:
+- 
+
+JwtAuthenticationFilter
+
+ com injeção de 
+
+CustomUserDetailsService
+
+
+- 
+
+AuthTokenFilter
+
+ com injeção de 
+
+UserDetailsServiceImpl
+
+
+
+Isso cria uma cadeia de filtros confusa onde ambos tentam processar a mesma autenticação.
+
+## 3. Conflito de UserDetailsService
+
+Você tem duas implementações de 
+
+UserDetailsService
+
+:
+- 
+
+CustomUserDetailsService
+
+
+- 
+
+UserDetailsServiceImpl
+
+
+
+Ambas fazem exatamente a mesma coisa, o que pode causar comportamento imprevisível.
+
+## 4. Problema na Configuração CORS
+
+Seu endpoint de login pode estar sendo bloqueado por CORS, especialmente se você estiver testando de um domínio diferente (por exemplo, Postman pode não estar afetado, mas um navegador sim).
+
+## 5. Problema no JwtTokenProvider
+
+No 
+
+AuthService.java
+
+, você usa:
+```java
+String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+```
+
+Mas no seu 
+
+JwtTokenProvider.java
+
+, há uma potencial confusão entre 
+
+generateJwtToken
+
+ e 
+
+generateAccessToken
+
+.
+
+## Soluções Recomendadas:
+
+### 1. Corrigir a Configuração de Propriedades
+
+```properties
+
+
+# Adicionar esta linha para corresponder à propriedade usada no RefreshTokenService
+jwt.refresh-expiration=86400000
+```
+
+### 2. Padronizar seus Filtros JWT (use apenas um)
+
+Mantenha apenas o 
+
+AuthTokenFilter
+
+ e remova o 
+
+JwtAuthenticationFilter
+
+:
+
+```java
+
+
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http.csrf(csrf -> csrf.disable())
+        .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+        .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .authorizeHttpRequests(auth -> 
+            auth.requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/public/**").permitAll()
+                .requestMatchers("/error").permitAll() 
+                .anyRequest().authenticated()
+        );
+    
+    http.authenticationProvider(authenticationProvider());
+    // Use apenas este filtro
+    http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
+    
+    return http.build();
+}
+```
+
+### 3. Unificar os Serviços UserDetailsService
+
+Mantenha apenas um UserDetailsService, preferencialmente 
+
+UserDetailsServiceImpl
+
+.
+
+### 4. Adicionar Log de Depuração para o Processo de Login
+
+```java
+
+
+public TokenResponseDTO login(LoginRequestDTO loginRequest) {
+    try {
+        System.out.println("Tentando autenticar usuário: " + loginRequest.getEmail());
+        
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+        System.out.println("Autenticação bem-sucedida para: " + loginRequest.getEmail());
+        
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+
+        String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+        
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+        return TokenResponseDTO.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken.getToken())
+                .tokenType("Bearer")
+                .build();
+    } catch (Exception e) {
+        System.err.println("Erro ao fazer login: " + e.getMessage());
+        e.printStackTrace();
+        throw e; // Re-throw para ser tratado pelo controller
+    }
+}
+```
+
+### 5. Habilitar CORS explicitamente
+
+```java
+
+
+@Bean
+public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http.csrf(csrf -> csrf.disable())
+        .cors(cors -> cors.configurationSource(corsConfigurationSource())) // Adicionar isso
+        .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
+        // resto do código...
+}
+
+@Bean
+public CorsConfigurationSource corsConfigurationSource() {
+    CorsConfiguration configuration = new CorsConfiguration();
+    configuration.setAllowedOrigins(Arrays.asList("*"));  // Para desenvolvimento; restrinja em produção
+    configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+    configuration.setAllowedHeaders(Arrays.asList("authorization", "content-type", "x-auth-token"));
+    configuration.setExposedHeaders(Arrays.asList("x-auth-token"));
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/**", configuration);
+    return source;
+}
+```
+
+### 6. Modificar o Controller para Retornar Detalhes de Erro
+
+```java
+
+
+021064/Documentos/GitHub/fairpay/fairpay-backend/src/main/java/com/fairpay/controller/AuthController.java
+
+@PostMapping("/login")
+public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+    try {
+        TokenResponseDTO tokenResponse = authService.login(loginRequest);
+        return ResponseEntity.ok(tokenResponse);
+    } catch (Exception e) {
+        // Captura qualquer erro e retorna uma resposta mais informativa
+        Map<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("success", false);
+        errorResponse.put("message", "Falha na autenticação: " + e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
+}
+```
+
+### 7. Verificar o registro de usuário
+
+O problema também pode estar na etapa de registro. Verifique se o usuário está sendo salvo corretamente no banco de dados:
+
+```java
+
+
+@PostMapping("/register")
+public ResponseEntity<?> register(@Valid @RequestBody RegisterRequestDTO request, HttpServletRequest httpRequest) {
+    try {
+        // Registra o usuário e obtém o resultado
+        User registeredUser = authService.register(request);
+        
+        System.out.println("Usuário registrado com sucesso: " + registeredUser.getEmail());
+        System.out.println("ID: " + registeredUser.getId());
+        
+        // Gerar tokens reais usando o serviço de autenticação
+        TokenResponseDTO tokenResponse = authService.login(
+                new LoginRequestDTO(request.getEmail(), request.getPassword()));
+        
+        // Cria o objeto de resposta no formato desejado
+        var response = new Object() {
+            public final boolean success = true;
+            public final String message = "Usuário registrado com sucesso!";
+            public final Object user = new Object() {
+                public final Long id = registeredUser.getId();
+                public final String name = registeredUser.getName();
+                public final String email = registeredUser.getEmail();
+            };
+            public final String accessToken = tokenResponse.getAccessToken();
+            public final String refreshToken = tokenResponse.getRefreshToken();
+        };
+        
+        return ResponseEntity.ok(response);
+    } catch (Exception e) {
+        e.printStackTrace();
+        return ResponseEntity.badRequest().body(new Object() {
+            public final boolean success = false;
+            public final String message = e.getMessage();
+        });
+    }
+}
+```
+
+## Ações Prioritárias:
+
+1. Adicione a propriedade 
+
+jwt.refresh-expiration
+
+ ao seu `application.properties`
+2. Remova ou desative o 
+
+JwtAuthenticationFilter
+
+ 
+3. Adicione logs para depurar o processo de autenticação
+4. Teste o registro e login com o Postman, verificando os detalhes do erro
+
+Estas alterações devem resolver seu problema de autenticação.
+
+Código semelhante encontrado com 2 tipos de licença
+
+Victor476:             Map<String, Object> errorResponse = new HashMap<>();
+
+Map cannot be resolved to a typeJava(16777218)
+
+
+GitHub Copilot: # Resolvendo o erro de importação do Map em AuthController
+
+O erro "Map cannot be resolved to a type" ocorre porque você não importou a classe `java.util.Map` e `java.util.HashMap` no arquivo 
+
+AuthController.java
+
+. 
+
+## Solução:
+
+Adicione as importações necessárias no topo do arquivo:
+
+```java
+
+
+package com.fairpay.controller;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RefreshTokenRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.User;
+import com.fairpay.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;  // Adicione esta importação
+
+// ... resto do seu código
+```
+
+Depois de adicionar essas importações, você pode usar `Map` e `HashMap` normalmente no seu código:
+
+```java
+@PostMapping("/login")
+public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+    try {
+        TokenResponseDTO tokenResponse = authService.login(loginRequest);
+        return ResponseEntity.ok(tokenResponse);
+    } catch (Exception e) {
+        Map<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("success", false);
+        errorResponse.put("message", "Falha na autenticação: " + e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
+}
+```
+
+## Alternativa usando classe anônima:
+
+Se preferir, você pode continuar usando a abordagem de classe anônima que estava utilizando antes:
+
+```java
+@PostMapping("/login")
+public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+    try {
+        TokenResponseDTO tokenResponse = authService.login(loginRequest);
+        return ResponseEntity.ok(tokenResponse);
+    } catch (Exception e) {
+        var errorResponse = new Object() {
+            public final boolean success = false;
+            public final String message = "Falha na autenticação: " + e.getMessage();
+        };
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
+}
+```
+
+Esta alternativa não requer importar `Map` e `HashMap`, mas é menos flexível para adicionar campos dinamicamente.
+
+## Nota:
+
+Na maioria das IDEs modernas como IntelliJ IDEA ou VS Code, você pode usar atalhos para importar classes automaticamente:
+- No VS Code: `Ctrl+.` ou `Ctrl+Shift+I`
+- No IntelliJ IDEA: `Alt+Enter`
+- No Eclipse: `Ctrl+Shift+O`
+
+Usar esses atalhos pode ajudar a evitar erros de importação como este.
+
+Código semelhante encontrado com 2 tipos de licença
+
+Victor476: agora deu esse erro
+
+{
+    "success": false,
+    "message": "Falha na autenticação: JDBC exception executing SQL [select rt1_0.id,rt1_0.expiry_date,rt1_0.token,rt1_0.user_id from refresh_tokens rt1_0 where rt1_0.user_id=?] [ERROR: column rt1_0.expiry_date does not exist\n  Posição: 17] [n/a]; SQL [n/a]"
+}
+
+GitHub Copilot: # Corrigindo o Erro de Coluna `expiry_date` no Banco de Dados
+
+O erro ocorre porque o Hibernate está tentando acessar uma coluna chamada `expiry_date` na tabela `refresh_tokens`, mas essa coluna não existe no banco de dados. Este é um erro comum quando:
+
+1. A tabela foi criada manualmente ou por outro processo
+2. Há uma incompatibilidade entre o modelo JPA e a estrutura real da tabela
+3. A tabela nunca foi criada corretamente
+
+## Solução: Criar a tabela corretamente
+
+### Opção 1: Deixar o Hibernate criar/atualizar a tabela
+
+Se você estiver usando `spring.jpa.hibernate.ddl-auto=update` no seu `application.properties`, o Hibernate deveria criar ou atualizar essa tabela automaticamente. Vamos garantir que isso aconteça:
+
+1. Verifique se a entidade 
+
+RefreshToken
+
+ está mapeada corretamente:
+
+```java
+
+
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "refresh_tokens")
+@Data
+public class RefreshToken {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String token;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Column(name = "expiry_date", nullable = false)  // Certifique-se de que o nome da coluna está especificado
+    private Instant expiryDate;
+}
+```
+
+2. Reinicie a aplicação com configuração para recriar as tabelas:
+
+```properties
+# Temporariamente, para forçar a recriação das tabelas
+spring.jpa.hibernate.ddl-auto=create-drop
+```
+
+Depois de executar uma vez, volte para:
+
+```properties
+spring.jpa.hibernate.ddl-auto=update
+```
+
+### Opção 2: Criar a tabela manualmente via SQL
+
+Execute este SQL no seu banco de dados PostgreSQL:
+
+```sql
+DROP TABLE IF EXISTS refresh_tokens;
+
+CREATE TABLE refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    expiry_date TIMESTAMP NOT NULL
+);
+```
+
+### Opção 3: Adicionar a coluna à tabela existente
+
+Se você quiser preservar os dados existentes:
+
+```sql
+ALTER TABLE refresh_tokens ADD COLUMN expiry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+```
+
+## Passos para corrigir:
+
+1. **Verificar o mapeamento da entidade**:
+   - Certifique-se de que o campo 
+
+expiryDate
+
+ na classe 
+
+RefreshToken
+
+ está mapeado para a coluna `expiry_date`
+
+2. **Verificar o esquema do banco de dados**:
+   - Use uma ferramenta SQL ou shell para verificar a estrutura atual da tabela:
+   ```sql
+   \d refresh_tokens
+   ```
+
+3. **Ajustar o esquema**:
+   - Use uma das opções acima para adicionar a coluna ou recriar a tabela
+
+4. **Testar novamente**:
+   - Faça um novo login para verificar se o erro foi resolvido
+
+## Ajuste no RefreshTokenService:
+
+Para facilitar a depuração, adicione logs durante a criação do refresh token:
+
+```java
+
+
+public RefreshToken createRefreshToken(Long userId) {
+    try {
+        // Verifica se o usuário já possui um refresh token e o deleta
+        userRepository.findById(userId).ifPresent(user -> {
+            refreshTokenRepository.deleteByUser(user);
+        });
+
+        RefreshToken refreshToken = new RefreshToken();
+        
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+
+        refreshToken.setUser(user);
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
+        refreshToken.setToken(UUID.randomUUID().toString());
+
+        System.out.println("Criando refresh token para usuário: " + userId);
+        System.out.println("Data de expiração: " + refreshToken.getExpiryDate());
+        
+        refreshToken = refreshTokenRepository.save(refreshToken);
+        return refreshToken;
+    } catch (Exception e) {
+        System.err.println("Erro ao criar refresh token: " + e.getMessage());
+        e.printStackTrace();
+        throw e;
+    }
+}
+```
+
+## Alternativa: Log para SQL
+
+Outra forma de diagnosticar o problema é habilitar o log SQL no `application.properties`:
+
+```properties
+# Configurações para mostrar SQL
+spring.jpa.properties.hibernate.show_sql=true
+spring.jpa.properties.hibernate.format_sql=true
+logging.level.org.hibernate.SQL=DEBUG
+logging.level.org.hibernate.type.descriptor.sql=TRACE
+```
+
+Isso permitirá que você veja as consultas SQL exatas que estão falhando.
+
+A abordagem mais rápida para resolver é recriar a tabela como descrito na Opção 1.
+
+Victor476: deu isso aqui agora
+
+    "success": false,
+    "message": "Falha na autenticação: JDBC exception executing SQL [select rt1_0.id,rt1_0.expiry_date,rt1_0.token,rt1_0.user_id from refresh_tokens rt1_0 where rt1_0.user_id=?] [ERROR: column rt1_0.expiry_date does not exist\n  Posição: 17] [n/a]; SQL [n/a]"
+}
+
+GitHub Copilot: # Resolvendo o Problema da Coluna expiry_date no PostgreSQL
+
+O banco de dados está reclamando que a coluna `expiry_date` não existe na tabela `refresh_tokens`. Mesmo tendo o mapeamento correto na sua classe 
+
+RefreshToken.java
+
+, a tabela física no banco de dados não possui essa coluna.
+
+## Solução: Recriar a Tabela no Banco de Dados
+
+### Passo 1: Atualizar o application.properties para recriar as tabelas
+
+```properties
+
+
+# Temporariamente, para recriar as tabelas
+spring.jpa.hibernate.ddl-auto=create-drop
+```
+
+### Passo 2: Rodar a aplicação uma vez para recriar as tabelas
+
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw spring-boot:run
+```
+
+### Passo 3: Parar a aplicação e voltar para o modo update
+
+```properties
+
+
+# Voltar para o modo update
+spring.jpa.hibernate.ddl-auto=update
+```
+
+### Passo 4: Rodar a aplicação novamente
+
+```bash
+./mvnw spring-boot:run
+```
+
+## Alternativa: Executar SQL Diretamente no Banco de Dados
+
+Se você preferir não recriar todas as tabelas (o que pode apagar dados existentes), você pode executar um SQL para adicionar a coluna:
+
+### Opção 1: Usando o psql (ferramenta de linha de comando do PostgreSQL)
+
+```bash
+psql -U postgres
+```
+
+Depois, na interface do psql:
+
+```sql
+\c fairpay
+ALTER TABLE refresh_tokens ADD COLUMN expiry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+```
+
+### Opção 2: Usando uma ferramenta gráfica (pgAdmin, DBeaver, etc.)
+
+Execute o mesmo SQL:
+
+```sql
+ALTER TABLE refresh_tokens ADD COLUMN expiry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+```
+
+## Alternativa: Via Código Java
+
+Se você não tiver acesso direto ao banco de dados, pode criar uma classe de inicialização:
+
+```java
+
+
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+@Component
+public class DatabaseInitializer implements CommandLineRunner {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Override
+    public void run(String... args) {
+        try {
+            // Verificar se a coluna existe
+            boolean columnExists = jdbcTemplate.queryForObject(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.columns " +
+                "WHERE table_name='refresh_tokens' AND column_name='expiry_date')",
+                Boolean.class
+            );
+            
+            if (!columnExists) {
+                System.out.println("Adicionando coluna expiry_date à tabela refresh_tokens");
+                jdbcTemplate.execute(
+                    "ALTER TABLE refresh_tokens ADD COLUMN expiry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                );
+                System.out.println("Coluna adicionada com sucesso");
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao verificar/adicionar coluna: " + e.getMessage());
+        }
+    }
+}
+```
+
+## Para diagnóstico:
+
+Antes de fazer todas essas alterações, você pode verificar a estrutura atual da tabela:
+
+```java
+
+
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+
+@Component
+public class DatabaseInspector implements CommandLineRunner {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Override
+    public void run(String... args) {
+        System.out.println("Inspecionando estrutura da tabela refresh_tokens");
+        
+        try {
+            List<Map<String, Object>> columns = jdbcTemplate.queryForList(
+                "SELECT column_name, data_type FROM information_schema.columns " +
+                "WHERE table_name = 'refresh_tokens'"
+            );
+            
+            System.out.println("Colunas encontradas:");
+            for (Map<String, Object> column : columns) {
+                System.out.println(column.get("column_name") + " (" + column.get("data_type") + ")");
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao inspecionar tabela: " + e.getMessage());
+        }
+    }
+}
+```
+
+## Escolha da Solução:
+
+A opção mais rápida e segura para desenvolvimento é a primeira: mudar temporariamente para `spring.jpa.hibernate.ddl-auto=create-drop`, executar a aplicação uma vez, e depois voltar para `update`. Isso recriará todas as tabelas conforme os mapeamentos JPA.
+
+Para ambientes de produção, use a opção do SQL direto para alterar apenas a tabela específica.
+
+Código semelhante encontrado com 2 tipos de licença
+
+Victor476: a tabela refresh_tokens tem as colunas {id,user_id,expires_at,created_at,revoked}
+
+GitHub Copilot: # Corrigindo o Mapeamento da Tabela RefreshToken
+
+Parece haver uma incompatibilidade entre o modelo JPA (
+
+RefreshToken.java
+
+) e a estrutura atual da tabela no banco de dados. A tabela no banco tem as colunas `{id, user_id, expires_at, created_at, revoked}`, mas o seu modelo JPA usa colunas diferentes (`{id, token, user_id, expiry_date}`).
+
+Existem duas opções para resolver esse problema:
+
+## Opção 1: Ajustar a entidade JPA para mapear à tabela existente
+
+```java
+
+
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.time.Instant;
+
+@Entity
+@Table(name = "refresh_tokens")
+@Data
+public class RefreshToken {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    // Adicionar o campo token como transiente (não será persistido)
+    // ou mapear para uma coluna existente que armazena esse valor
+    @Transient
+    private String token;  // Transiente - não será mapeado para o banco
+
+    @OneToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Column(name = "expires_at", nullable = false)  // Usando o nome correto da coluna
+    private Instant expiryDate;
+    
+    @Column(name = "created_at")
+    private Instant createdAt;
+    
+    @Column(name = "revoked")
+    private Boolean revoked;
+    
+    // Método para obter o token (usando o ID como token, por exemplo)
+    public String getToken() {
+        // Se você não tem uma coluna token, pode gerar um valor baseado em outros campos
+        // Esta é apenas uma abordagem - ajuste conforme necessário
+        return String.valueOf(this.id);
+    }
+    
+    // Método para definir o token (opcional - implementar se necessário)
+    public void setToken(String token) {
+        // Em um cenário real, você poderia armazenar isso em outra coluna
+        this.token = token;
+    }
+    
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = Instant.now();
+        this.revoked = false;
+    }
+}
+```
+
+## Opção 2: Recriar a tabela para corresponder ao seu modelo JPA
+
+Esta opção pode ser mais limpa se você não tiver dados importantes na tabela existente.
+
+1. Primeiro, remova a tabela atual:
+
+```sql
+DROP TABLE IF EXISTS refresh_tokens;
+```
+
+2. Deixe o Hibernate criar a nova tabela:
+
+```properties
+
+
+# Temporariamente, para recriar as tabelas
+spring.jpa.hibernate.ddl-auto=create-drop
+```
+
+3. Execute a aplicação uma vez e depois volte para `update`:
+
+```properties
+
+
+# Voltar para o modo update
+spring.jpa.hibernate.ddl-auto=update
+```
+
+## Opção 3: Criar uma nova tabela com um nome diferente
+
+Se você não pode alterar a tabela existente, crie uma nova:
+
+```java
+
+
+@Entity
+@Table(name = "app_refresh_tokens")  // Nome diferente para a nova tabela
+public class RefreshToken {
+    // ... conteúdo existente
+}
+```
+
+E então ajuste o `application.properties`:
+
+```properties
+
+
+# Para criar apenas a nova tabela
+spring.jpa.hibernate.ddl-auto=update
+```
+
+## Recomendação
+
+A Opção 1 (ajustar o modelo JPA) é geralmente a mais segura se você já tiver dados no banco de produção. Assim você não perderá dados existentes.
+
+A Opção 2 (recriar a tabela) é mais simples e limpa se você estiver em ambiente de desenvolvimento e puder descartar os dados existentes.
+
+De qualquer forma, certifique-se de que o `RefreshTokenService` e outras classes relacionadas estão adaptadas para trabalhar com o modelo de dados que você escolher.
+
+Victor476: prefiro alterar o código mas precisa alterar mais algum outro código?
+
+GitHub Copilot: # Ajustes Necessários para a Nova Estrutura do RefreshToken
+
+Sim, ao alterar a estrutura do modelo `RefreshToken`, é necessário ajustar também os códigos relacionados para garantir a compatibilidade. Aqui estão as modificações necessárias:
+
+## 1. Atualização do RefreshTokenService
+
+```java
+
+
+package com.fairpay.service;
+
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class RefreshTokenService {
+    
+    @Value("${jwt.refreshExpiration}")
+    private Long refreshTokenDurationMs;
+    
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    @Transactional
+    public RefreshToken createRefreshToken(Long userId) {
+        // Remover tokens antigos
+        refreshTokenRepository.deleteByUserId(userId);
+        
+        // Criar novo token
+        RefreshToken refreshToken = new RefreshToken();
+        
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+
+        refreshToken.setUser(user);
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
+        refreshToken.setCreatedAt(Instant.now());
+        refreshToken.setRevoked(false);
+        // Não precisamos mais definir o token na entidade, pois ele será gerado pelo getToken()
+        
+        return refreshTokenRepository.save(refreshToken);
+    }
+
+    public Optional<RefreshToken> findByToken(String token) {
+        try {
+            // Como o token agora é derivado do ID, precisamos extrair o ID do token
+            Long tokenId = Long.parseLong(token);
+            return refreshTokenRepository.findById(tokenId);
+        } catch (NumberFormatException e) {
+            // Se o token não for um ID válido, retorna empty
+            return Optional.empty();
+        }
+    }
+
+    public RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0 || Boolean.TRUE.equals(token.getRevoked())) {
+            refreshTokenRepository.delete(token);
+            throw new TokenRefreshException(token.getToken(), 
+                    "Refresh token expirado ou revogado. Faça login novamente.");
+        }
+        
+        return token;
+    }
+
+    @Transactional
+    public int deleteByUserId(Long userId) {
+        return refreshTokenRepository.deleteByUserId(userId);
+    }
+}
+```
+
+## 2. Atualização do RefreshTokenRepository
+
+```java
+
+
+package com.fairpay.repository;
+
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    
+    // O método findByToken não é mais necessário porque agora usamos o ID como token
+    
+    @Modifying
+    @Query("DELETE FROM RefreshToken r WHERE r.user.id = :userId")
+    int deleteByUserId(Long userId);
+    
+    Optional<RefreshToken> findByUser(User user);
+}
+```
+
+## 3. Atualização do AuthService
+
+```java
+
+
+// Apenas o método relevante que precisa ser alterado
+
+public TokenResponseDTO login(LoginRequestDTO loginRequest) {
+    Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+
+    SecurityContextHolder.getContext().setAuthentication(authentication);
+    AuthenticatedUser userDetails = (AuthenticatedUser) authentication.getPrincipal();
+
+    String accessToken = tokenProvider.generateAccessToken(userDetails, userDetails.getId());
+    
+    RefreshToken refreshToken = refreshTokenService.createRefreshToken(userDetails.getId());
+
+    return TokenResponseDTO.builder()
+            .accessToken(accessToken)
+            .refreshToken(refreshToken.getToken()) // Agora usa o método getToken()
+            .tokenType("Bearer")
+            .build();
+}
+```
+
+## 4. Adicionar Propriedades Faltantes no RefreshToken
+
+Se você ainda não adicionou, certifique-se de incluir os getters e setters para as novas propriedades:
+
+```java
+
+
+// Apenas métodos adicionais que precisam ser incluídos
+
+public Instant getCreatedAt() {
+    return createdAt;
+}
+
+public void setCreatedAt(Instant createdAt) {
+    this.createdAt = createdAt;
+}
+
+public Boolean getRevoked() {
+    return revoked;
+}
+
+public void setRevoked(Boolean revoked) {
+    this.revoked = revoked;
+}
+
+// O método getExpiryDate() já deve existir, mas aqui está para completude
+public Instant getExpiryDate() {
+    return expiryDate;
+}
+
+public void setExpiryDate(Instant expiryDate) {
+    this.expiryDate = expiryDate;
+}
+```
+
+## 5. Atualizar logout para revogar tokens
+
+```java
+
+
+@Transactional
+public void logout(Long userId) {
+    // Versão anterior só excluía os tokens
+    // refreshTokenService.deleteByUserId(userId);
+    
+    // Nova versão: marca os tokens como revogados
+    userRepository.findById(userId).ifPresent(user -> {
+        refreshTokenService.findByUser(user).ifPresent(token -> {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+        });
+    });
+}
+```
+
+## 6. Adicionar método findByUser no RefreshTokenService
+
+```java
+
+
+// Adicione este método
+
+public Optional<RefreshToken> findByUser(User user) {
+    return refreshTokenRepository.findByUser(user);
+}
+```
+
+## 7. Casos de Borda e Considerações
+
+1. **Transições de estado**: O código agora usa o ID como token. Os tokens existentes não funcionarão mais.
+
+2. **Segurança**: Usar o ID como token é menos seguro que um UUID aleatório. Para melhorar a segurança:
+
+```java
+
+
+// Método getToken() mais seguro
+
+public String getToken() {
+    // Combine o ID com um segredo da aplicação para maior segurança
+    String appSecret = "sua_chave_secreta_fixa"; // Idealmente viria de uma configuração
+    return id + "_" + Base64.getEncoder().encodeToString(
+        (id + appSecret + createdAt.toEpochMilli()).getBytes()
+    );
+}
+```
+
+Com essa implementação, você precisará modificar o método `findByToken`:
+
+```java
+public Optional<RefreshToken> findByToken(String token) {
+    try {
+        // Extrair o ID do token (formato: "id_hash")
+        String[] parts = token.split("_");
+        if (parts.length != 2) {
+            return Optional.empty();
+        }
+        
+        Long tokenId = Long.parseLong(parts[0]);
+        return refreshTokenRepository.findById(tokenId);
+        // Nota: Idealmente você validaria o hash também
+    } catch (Exception e) {
+        return Optional.empty();
+    }
+}
+```
+
+## Resumo das Alterações
+
+1. Atualizamos o `RefreshToken` para corresponder à estrutura da tabela no banco de dados
+2. Modificamos o `RefreshTokenService` para trabalhar com o novo modelo
+3. Atualizamos o `RefreshTokenRepository` removendo métodos desnecessários
+4. Ajustamos o método de logout para revogar tokens em vez de excluí-los
+5. Oferecemos uma implementação mais segura para o método 
+
+getToken()
+
+
+
+Essas alterações devem permitir que seu sistema funcione com a tabela `refresh_tokens` existente.
+
+Código semelhante encontrado com 3 tipos de licença
+
+Victor476: pra não usar o id como token eu teria que fazer alguma alteração no banco ou pode alterar só o código mesmo?
+
+GitHub Copilot: # Implementando um Token Seguro sem Alteração no Banco
+
+Você pode implementar um token seguro sem precisar alterar o banco de dados, usando uma combinação dos dados existentes. Vamos criar uma solução que não exige alteração na estrutura da tabela.
+
+## Solução: Usar um Campo Virtual para o Token
+
+### 1. Atualizar a classe RefreshToken
+
+```java
+
+
+package com.fairpay.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+
+import java.time.Instant;
+import java.util.Base64;
+
+@Entity
+@Table(name = "refresh_tokens")
+@Data
+public class RefreshToken {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Transient // Campo virtual - não será armazenado no banco
+    private String token;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
+    @Column(name = "expires_at", nullable = false)
+    private Instant expiryDate;
+    
+    @Column(name = "created_at")
+    private Instant createdAt;
+    
+    @Column(name = "revoked")
+    private Boolean revoked;
+    
+    /**
+     * Gera um token seguro baseado nas propriedades da entidade
+     */
+    public String getToken() {
+        if (id == null) return null;
+        
+        // Gera um token composto do ID e um hash dos dados
+        String data = String.format("%d:%d:%s", 
+                id, 
+                user.getId(), 
+                createdAt != null ? createdAt.toEpochMilli() : Instant.now().toEpochMilli());
+        
+        String hash = Base64.getUrlEncoder().encodeToString(
+                data.getBytes()
+        );
+        
+        return String.format("%d.%s", id, hash);
+    }
+    
+    /**
+     * Setter para token - não faz nada, apenas para compatibilidade com @Data
+     */
+    public void setToken(String token) {
+        // Não precisa implementar nada, já que é um campo virtual
+        this.token = token;
+    }
+    
+    @PrePersist
+    protected void onCreate() {
+        if (createdAt == null) {
+            this.createdAt = Instant.now();
+        }
+        if (revoked == null) {
+            this.revoked = false;
+        }
+    }
+}
+```
+
+### 2. Atualizar o RefreshTokenService para extrair o ID do token
+
+```java
+
+
+package com.fairpay.service;
+
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.Optional;
+
+@Service
+public class RefreshTokenService {
+    
+    @Value("${jwt.refreshExpiration}")
+    private Long refreshTokenDurationMs;
+    
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+    
+    @Autowired
+    private UserRepository userRepository;
+
+    @Transactional
+    public RefreshToken createRefreshToken(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado com id: " + userId));
+        
+        // Verificar se já existe um token para este usuário
+        Optional<RefreshToken> existingToken = refreshTokenRepository.findByUser(user);
+        if (existingToken.isPresent()) {
+            // Verifica se o token está expirado ou revogado
+            RefreshToken token = existingToken.get();
+            if (token.getExpiryDate().isAfter(Instant.now()) && !Boolean.TRUE.equals(token.getRevoked())) {
+                // Token existente ainda válido, retorna ele
+                return token;
+            } else {
+                // Token expirado ou revogado, deleta para criar um novo
+                refreshTokenRepository.delete(token);
+            }
+        }
+        
+        // Criar novo token
+        RefreshToken refreshToken = new RefreshToken();
+        refreshToken.setUser(user);
+        refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
+        refreshToken.setCreatedAt(Instant.now());
+        refreshToken.setRevoked(false);
+        
+        return refreshTokenRepository.save(refreshToken);
+    }
+
+    public Optional<RefreshToken> findByToken(String token) {
+        try {
+            // Extrai o ID do token (formato "id.hash")
+            String[] parts = token.split("\\.", 2);
+            if (parts.length != 2) {
+                return Optional.empty();
+            }
+            
+            Long id = Long.parseLong(parts[0]);
+            Optional<RefreshToken> refreshToken = refreshTokenRepository.findById(id);
+            
+            // Verifica se o token gerado pela entidade corresponde ao token fornecido
+            if (refreshToken.isPresent() && token.equals(refreshToken.get().getToken())) {
+                return refreshToken;
+            }
+            
+            return Optional.empty();
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    public RefreshToken verifyExpiration(RefreshToken token) {
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+            throw new TokenRefreshException(token.getToken(), 
+                    "Refresh token expirado. Faça login novamente.");
+        }
+        
+        if (Boolean.TRUE.equals(token.getRevoked())) {
+            throw new TokenRefreshException(token.getToken(), 
+                    "Refresh token foi revogado. Faça login novamente.");
+        }
+        
+        return token;
+    }
+
+    @Transactional
+    public int deleteByUserId(Long userId) {
+        return refreshTokenRepository.deleteByUserId(userId);
+    }
+    
+    public Optional<RefreshToken> findByUser(User user) {
+        return refreshTokenRepository.findByUser(user);
+    }
+}
+```
+
+### 3. Atualizar o AuthService
+
+```java
+
+
+@Autowired
+private RefreshTokenRepository refreshTokenRepository;
+
+@Transactional
+public void logout(Long userId) {
+    userRepository.findById(userId).ifPresent(user -> {
+        refreshTokenService.findByUser(user).ifPresent(token -> {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+        });
+    });
+}
+```
+
+## Benefícios desta abordagem:
+
+1. **Não requer alteração no banco de dados**: Usa a estrutura existente da tabela
+2. **Segurança melhorada**: O token contém uma parte de hash que valida a integridade
+3. **Fácil identificação**: O primeiro componente do token é o ID, facilitando a busca
+4. **Compatibilidade**: O sistema ainda funciona com tokens legados se necessário
+5. **Facilidade de implementação**: Só requer alterações no código Java
+
+## Como funciona:
+
+1. Quando um token é gerado, ele combina o ID com um hash baseado em várias propriedades (ID, user_id, timestamp)
+2. Quando o token é validado, primeiro extraímos o ID para buscar o registro no banco
+3. Depois verificamos se o token completo (incluindo o hash) corresponde ao que seria gerado a partir do registro resgatado
+
+Esta implementação é uma boa solução para seu caso, pois:
+- Não requer alterações no banco de dados
+- É mais segura que usar apenas o ID como token
+- Mantém a lógica de negócio existente
+
+A única desvantagem é que se um intruso tiver acesso ao código-fonte, poderia reproduzir o algoritmo de geração do token. Para melhorar isso ainda mais, você poderia adicionar um "segredo" ao hash ou usar alguma informação única do usuário que não esteja facilmente disponível.
+
+Código semelhante encontrado com 2 tipos de licença
+
+Victor476: ele esta mandando a seguinte mensagem de erro na linha
+
+Transactional cannot be resolved to a typeJava(16777218)
+
+
+GitHub Copilot: # Corrigindo o erro de importação @Transactional
+
+O erro "Transactional cannot be resolved to a type" ocorre porque você não tem a importação necessária para a anotação `@Transactional`. Esta anotação pode vir de diferentes pacotes dependendo da sua configuração.
+
+## Solução:
+
+Adicione a importação correta no topo do arquivo:
+
+```java
+
+
+package com.fairpay.service;
+
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
+import com.fairpay.model.RefreshToken;
+import com.fairpay.model.User;
+import com.fairpay.repository.RefreshTokenRepository;
+import com.fairpay.repository.UserRepository;
+import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.security.JwtTokenProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;  // <-- Adicione esta importação
+
+import java.util.Collections;
+```
+
+## Alternativas:
+
+Se você estiver usando o Jakarta EE em vez do Spring, poderá precisar desta importação:
+
+```java
+import jakarta.transaction.Transactional;
+```
+
+Ou se estiver usando JTA:
+
+```java
+import javax.transaction.Transactional;
+```
+
+A versão do Spring é a mais comum e provavelmente a que você está usando:
+
+```java
+import org.springframework.transaction.annotation.Transactional;
+```
+
+## Dicas:
+
+1. A maioria das IDEs modernas, como IntelliJ IDEA ou VS Code, pode adicionar automaticamente importações ausentes:
+   - No VS Code: Ctrl+. (ou Cmd+. no Mac)
+   - No IntelliJ: Alt+Enter (ou Option+Enter no Mac)
+
+2. Você também pode organizar todas as importações:
+   - No VS Code: Shift+Alt+O (ou Shift+Option+O no Mac)
+   - No IntelliJ: Ctrl+Alt+O (ou Cmd+Option+O no Mac)
+
+3. Verifique se você tem a dependência correta no seu pom.xml:
+
+```xml
+<dependency>
+    <groupId>org.springframework</groupId>
+    <artifactId>spring-tx</artifactId>
+</dependency>
+```
+
+Na maioria dos casos, isso já está incluído transitivamente através de `spring-boot-starter-data-jpa`.
+
+Depois de adicionar a importação correta, o erro deve desaparecer.
+
+Código semelhante encontrado com 1 tipo de licença
+
+Victor476: 7. Casos de Borda e Considerações
+Transições de estado: O código agora usa o ID como token. Os tokens existentes não funcionarão mais.
+
+Segurança: Usar o ID como token é menos seguro que um UUID aleatório. Para melhorar a segurança:
+
+Com essa implementação, você precisará modificar o método findByToken:
+
+essa parte ainda é nescessaria?
+
+GitHub Copilot: # Esclarecendo a Implementação do Token
+
+Não, aquela parte sobre "Casos de Borda e Considerações" não é mais necessária, pois você já implementou uma solução mais sofisticada no arquivo `RefreshToken.java` que não usa apenas o ID como token.
+
+Na sua implementação atual, você está:
+
+1. Gerando um token seguro no formato `{id}.{hash}` onde o hash é um valor codificado em Base64 contendo informações do token
+2. No método `findByToken()`, você está:
+   - Separando o token em seus componentes (ID e hash)
+   - Buscando o token pelo ID no banco de dados
+   - Verificando se o token fornecido corresponde ao token que seria gerado a partir do registro encontrado
+
+## O que já foi resolvido:
+
+1. ✅ **Segurança**: Você não está mais usando apenas o ID como token, mas sim um formato composto com hash
+2. ✅ **Transição de estado**: Você está validando o token completo, não apenas o ID
+
+## O que você já tem implementado:
+
+```java
+// Em RefreshToken.java
+public String getToken() {
+    if (id == null) return null;
+    
+    // Gera um token composto do ID e um hash dos dados
+    String data = String.format("%d:%d:%s", 
+            id, 
+            user.getId(), 
+            createdAt != null ? createdAt.toEpochMilli() : Instant.now().toEpochMilli());
+    
+    String hash = Base64.getUrlEncoder().encodeToString(
+            data.getBytes()
+    );
+    
+    return String.format("%d.%s", id, hash);
+}
+```
+
+```java
+// Em RefreshTokenService.java
+public Optional<RefreshToken> findByToken(String token) {
+    try {
+        // Extrai o ID do token (formato "id.hash")
+        String[] parts = token.split("\\.", 2);
+        if (parts.length != 2) {
+            return Optional.empty();
+        }
+        
+        Long id = Long.parseLong(parts[0]);
+        Optional<RefreshToken> refreshToken = refreshTokenRepository.findById(id);
+        
+        // Verifica se o token gerado pela entidade corresponde ao token fornecido
+        if (refreshToken.isPresent() && token.equals(refreshToken.get().getToken())) {
+            return refreshToken;
+        }
+        
+        return Optional.empty();
+    } catch (Exception e) {
+        return Optional.empty();
+
+
+Victor476: como executa a aplicação mesmo?
+
+GitHub Copilot: # Executando a Aplicação Spring Boot
+
+Para executar sua aplicação Spring Boot, você tem várias opções:
+
+## 1. Usando Maven pela Linha de Comando
+
+### Maven Wrapper (recomendado):
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw spring-boot:run
+```
+
+### Maven instalado globalmente:
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+mvn spring-boot:run
+```
+
+## 2. Usando uma IDE
+
+### VS Code:
+1. Abra o projeto no VS Code
+2. Instale a extensão "Spring Boot Extension Pack"
+3. Clique no ícone Spring na barra lateral
+4. Localize sua aplicação e clique no botão play
+
+### IntelliJ IDEA:
+1. Abra o projeto no IntelliJ
+2. Localize a classe principal (FairpayBackendApplication.java)
+3. Clique com o botão direito e selecione "Run FairpayBackendApplication"
+
+### Eclipse / Spring Tool Suite:
+1. Abra o projeto
+2. Clique com o botão direito no projeto
+3. Selecione "Run As" > "Spring Boot App"
+
+## 3. Usando o JAR compilado
+
+Primeiro, compile o projeto:
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw clean package
+```
+
+Depois execute o JAR:
+```bash
+java -jar target/fairpay-backend-0.0.1-SNAPSHOT.jar
+```
+
+## Verificando se a aplicação está rodando
+
+Após iniciar a aplicação, você deve ver no console uma mensagem indicando que o servidor Tomcat foi iniciado, algo como:
+```
+2023-06-16 18:42:39.970-03:00 INFO --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8090 (http)
+```
+
+Você pode acessar a aplicação em:
+```
+http://localhost:8090
+```
+
+## Importante: Verificar o banco de dados
+
+Certifique-se de que seu banco de dados PostgreSQL está em execução e acessível antes de iniciar a aplicação. Caso contrário, você verá erros de conexão.
+
+## Debug e Logs
+
+Para ver mais logs durante a inicialização:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments="--debug"
+```
+
+Se precisar alterar a porta padrão:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.arguments="--server.port=8091"
+```
+
+Considerando seu projeto, o comando mais simples para executar é:
+
+```bash
+cd /home/alunos/a2021064/Documentos/GitHub/fairpay/fairpay-backend/
+./mvnw spring-boot:run
+```
+
+Victor476: ocorreu esse erro
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2025-06-16T20:15:22.404-03:00 ERROR 5964 --- [fairpay] [  restartedMain] o.s.boot.SpringApplication               : Application run failed
+
+org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'authController': Unsatisfied dependency expressed through field 'authService': Error creating bean with name 'authService': Unsatisfied dependency expressed through field 'refreshTokenService': Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:788) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.instantiateSingleton(DefaultListableBeanFactory.java:1155) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingleton(DefaultListableBeanFactory.java:1121) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingletons(DefaultListableBeanFactory.java:1056) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:987) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:627) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:146) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:752) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:439) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:318) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1361) ~[spring-boot-3.4.4.jar:3.4.4]
+        at org.springframework.boot.SpringApplication.run(SpringApplication.java:1350) ~[spring-boot-3.4.4.jar:3.4.4]
+        at com.fairpay.FairpayBackendApplication.main(FairpayBackendApplication.java:10) ~[classes/:na]
+        at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103) ~[na:na]
+        at java.base/java.lang.reflect.Method.invoke(Method.java:580) ~[na:na]
+        at org.springframework.boot.devtools.restart.RestartLauncher.run(RestartLauncher.java:50) ~[spring-boot-devtools-3.4.4.jar:3.4.4]
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'authService': Unsatisfied dependency expressed through field 'refreshTokenService': Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:788) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1609) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 25 common frames omitted
+Caused by: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'refreshTokenService': Injection of autowired dependencies failed
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:515) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.populateBean(AbstractAutowireCapableBeanFactory.java:1445) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:523) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:339) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:347) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:337) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:202) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1609) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 38 common frames omitted
+Caused by: org.springframework.util.PlaceholderResolutionException: Could not resolve placeholder 'jwt.refreshExpiration' in value "${jwt.refreshExpiration}"
+        at org.springframework.util.PlaceholderResolutionException.withValue(PlaceholderResolutionException.java:81) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser$ParsedValue.resolve(PlaceholderParser.java:423) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PlaceholderParser.replacePlaceholders(PlaceholderParser.java:128) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.parseStringValue(PropertyPlaceholderHelper.java:118) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.util.PropertyPlaceholderHelper.replacePlaceholders(PropertyPlaceholderHelper.java:114) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.doResolvePlaceholders(AbstractPropertyResolver.java:255) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.core.env.AbstractPropertyResolver.resolveRequiredPlaceholders(AbstractPropertyResolver.java:226) ~[spring-core-6.2.5.jar:6.2.5]
+        at org.springframework.context.support.PropertySourcesPlaceholderConfigurer.lambda$processProperties$0(PropertySourcesPlaceholderConfigurer.java:201) ~[spring-context-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.AbstractBeanFactory.resolveEmbeddedValue(AbstractBeanFactory.java:971) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1577) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1555) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.resolveFieldValue(AutowiredAnnotationBeanPostProcessor.java:785) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor$AutowiredFieldElement.inject(AutowiredAnnotationBeanPostProcessor.java:768) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.InjectionMetadata.inject(InjectionMetadata.java:146) ~[spring-beans-6.2.5.jar:6.2.5]
+        at org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor.postProcessProperties(AutowiredAnnotationBeanPostProcessor.java:509) ~[spring-beans-6.2.5.jar:6.2.5]
+        ... 48 common frames omitted
+
+GitHub Copilot: # Corrigindo o Erro de Propriedade JWT
+
+O erro está claro: `Could not resolve placeholder 'jwt.refreshExpiration' in value "${jwt.refreshExpiration}"`. Isso significa que o Spring não consegue encontrar a propriedade `jwt.refreshExpiration` no arquivo `application.properties`.
+
+## Problema Encontrado
+
+No arquivo `RefreshTokenService.java`, você está tentando injetar uma propriedade chamada `jwt.refreshExpiration`:
+
+```java
+@Value("${jwt.refreshExpiration}")
+private Long refreshTokenDurationMs;
+```
+
+Mas no arquivo `application.properties`, você provavelmente tem uma variação diferente deste nome, como `jwt.refresh-expiration` (com hífen) ou a propriedade está ausente.
+
+## Solução
+
+Vamos corrigir isso atualizando seu arquivo `application.properties`:
+
+1. Abra o arquivo `application.properties`:
+
+```bash
+nano src/main/resources/application.properties
+```
+
+2. Verifique se a propriedade está presente. Você deve adicionar ou modificar:
+
+```properties
+# JWT Configuration
+jwt.secret=YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+jwt.expiration=900000
+jwt.refreshExpiration=86400000  # certifique-se de que esta linha existe e está escrita exatamente assim
+```
+
+3. Salve o arquivo e reinicie a aplicação:
+
+```bash
+./mvnw spring-boot:run
+```
+
+## Verificações adicionais
+
+Se o problema persistir, você tem algumas opções:
+
+### 1. Verificar o nome exato da propriedade no serviço:
+
+Abra o arquivo `RefreshTokenService.java` e verifique exatamente como a propriedade está definida:
+
+```java
+@Value("${jwt.refreshExpiration}")  // Verifique se é exatamente isso
+private Long refreshTokenDurationMs;
+```
+
+### 2. Fazer debug para ver todas as propriedades:
+
+Crie uma classe temporária para imprimir todas as propriedades disponíveis:
+
+```java
+package com.fairpay.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
+
+@Component
+public class PropertyDebugger implements CommandLineRunner {
+
+    @Autowired
+    private Environment env;
+
+    @Override
+    public void run(String... args) {
+        System.out.println("========= PROPRIEDADES JWT =========");
+        System.out.println("jwt.secret: " + env.getProperty("jwt.secret"));
+        System.out.println("jwt.expiration: " + env.getProperty("jwt.expiration"));
+        System.out.println("jwt.refreshExpiration: " + env.getProperty("jwt.refreshExpiration"));
+        System.out.println("jwt.refresh-expiration: " + env.getProperty("jwt.refresh-expiration"));
+        System.out.println("app.jwt.refresh-expiration: " + env.getProperty("app.jwt.refresh-expiration"));
+        System.out.println("====================================");
+    }
+}
+```
+
+### 3. Definir um valor padrão na anotação @Value:
+
+```java
+@Value("${jwt.refreshExpiration:86400000}")  // Valor padrão de 24 horas
+private Long refreshTokenDurationMs;
+```
+
+### 4. Verificar o arquivo application.properties carregado:
+
+Certifique-se de que você não tenha múltiplos arquivos de propriedades (como application-dev.properties) que estejam substituindo seus valores.
+
+## Solução rápida:
+
+A solução mais rápida é adicionar a propriedade ao arquivo `application.properties` com o nome correto `jwt.refreshExpiration=86400000` e reiniciar a aplicação.
+
+Verifique também se não há erros de digitação ou espaços extras no arquivo de propriedades.

@@ -1,15 +1,28 @@
 package com.fairpay.controller;
 
+import com.fairpay.dto.LoginRequestDTO;
+import com.fairpay.dto.RefreshTokenRequestDTO;
 import com.fairpay.dto.RegisterRequestDTO;
+import com.fairpay.dto.TokenResponseDTO;
+import com.fairpay.exception.TokenRefreshException;
 import com.fairpay.model.User;
+import com.fairpay.security.AuthenticatedUser;
 import com.fairpay.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+
+import java.util.HashMap;
+import java.util.Map; 
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+
 @RestController
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 public class AuthController {
 
     @Autowired
@@ -17,8 +30,6 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody RegisterRequestDTO request, HttpServletRequest httpRequest) {
-        System.out.println("Requisição para: " + httpRequest.getRequestURI());
-        
         // Registra o usuário e obtém o resultado
         User registeredUser = authService.register(request);
         
@@ -31,16 +42,39 @@ public class AuthController {
                 public final String name = registeredUser.getName();
                 public final String email = registeredUser.getEmail();
             };
-            // Aqui você pode adicionar geração de token se tiver implementado JWT
-            public final String token = generateDummyToken(registeredUser);
         };
         
         return ResponseEntity.ok(response);
     }
     
-    // Método temporário para gerar um token fictício
-    // Em produção, você teria uma implementação real de JWT
-    private String generateDummyToken(User user) {
-        return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTYiLCJuYW1lIjoiTm9tZSBkbyBVc3XDoXJpbyIsImlhdCI6MTUxNjIzOTAyMn0.exemplo_token_jwt";
+    @PostMapping("/login")
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        try {
+            TokenResponseDTO tokenResponse = authService.login(loginRequest);
+            return ResponseEntity.ok(tokenResponse);
+        } catch (Exception e) {
+            // Captura qualquer erro e retorna uma resposta mais informativa
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", "Falha na autenticação: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        try {
+            TokenResponseDTO response = authService.refreshToken(request.getRefreshToken());
+            return ResponseEntity.ok(response);
+        } catch (TokenRefreshException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logoutUser(@AuthenticationPrincipal AuthenticatedUser user) {
+        Long userId = user.getId();
+        authService.logout(userId);
+        return ResponseEntity.ok().body("Logout realizado com sucesso!");
     }
 }
