@@ -73,6 +73,10 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<?> logoutUser(@AuthenticationPrincipal AuthenticatedUser user) {
+        if (user == null) {
+            return ResponseEntity.ok().body("Usuário já estava deslogado");
+        }
+        
         Long userId = user.getId();
         authService.logout(userId);
         return ResponseEntity.ok().body("Logout realizado com sucesso!");

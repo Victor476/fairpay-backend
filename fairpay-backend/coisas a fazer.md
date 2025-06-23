@@ -10591,3 +10591,233 @@ Certifique-se de que você não tenha múltiplos arquivos de propriedades (como 
 A solução mais rápida é adicionar a propriedade ao arquivo `application.properties` com o nome correto `jwt.refreshExpiration=86400000` e reiniciar a aplicação.
 
 Verifique também se não há erros de digitação ou espaços extras no arquivo de propriedades.
+
+Victor476: explica de novo como implementar o docker tanto no repositório do frontend quanto do backend olhe o workspace
+
+Workspace: Coletando informações do workspace
+
+# Implementando Docker no Projeto FairPay (Backend e Frontend)
+
+Vou explicar como criar a configuração Docker para seu projeto FairPay com backend Spring Boot e frontend Next.js, baseado na estrutura que você já possui.
+
+## Configuração do Backend (Spring Boot)
+
+### 1. Criar Dockerfile no Backend
+
+No diretório raiz do seu backend, crie um arquivo 
+
+Dockerfile
+
+:
+
+```dockerfile
+FROM eclipse-temurin:21-jdk-alpine as build
+
+WORKDIR /app
+
+# Copiar arquivos do projeto
+COPY mvnw pom.xml ./
+COPY .mvn .mvn
+RUN chmod +x ./mvnw
+RUN ./mvnw dependency:go-offline -B
+
+# Copiar código fonte e compilar
+COPY src ./src
+RUN ./mvnw clean package -DskipTests
+
+# Imagem final otimizada
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+# Copiar o JAR compilado
+COPY --from=build /app/target/*.jar app.jar
+
+# Variáveis de ambiente (podem ser sobrescritas no docker-compose)
+ENV SPRING_PROFILES_ACTIVE=prod
+ENV SERVER_PORT=8090
+
+# Expor a porta do Spring Boot
+EXPOSE 8090
+
+# Comando para iniciar a aplicação
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+### 2. Criar .dockerignore no Backend
+
+Para otimizar a build, crie um arquivo `.dockerignore`:
+
+```
+target/
+!target/*.jar
+.git
+.gitignore
+README.md
+```
+
+## Configuração do Frontend (Next.js)
+
+### 1. Criar Dockerfile no Frontend
+
+Na raiz do projeto frontend, crie um arquivo 
+
+Dockerfile
+
+:
+
+```dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copiar arquivos de configuração
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+# Copiar código-fonte
+COPY . .
+
+# Construir aplicação
+RUN npm run build
+
+# Imagem para produção
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Definir ambiente como produção
+ENV NODE_ENV=production
+
+# Copiar arquivos necessários da etapa de build
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.js ./next.config.js
+
+# Expor porta
+EXPOSE 3000
+
+# Iniciar aplicação
+CMD ["npm", "start"]
+```
+
+### 2. Criar .dockerignore no Frontend
+
+```
+node_modules
+.next
+.git
+.gitignore
+README.md
+```
+
+## Configurando Docker Compose
+
+Na raiz do projeto (um nível acima de ambos os projetos), crie um arquivo `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: fairpay-postgres
+    environment:
+      POSTGRES_DB: fairpay
+      POSTGRES_USER: fairpay
+      POSTGRES_PASSWORD: fairpay123
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - fairpay-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fairpay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Spring Boot
+  backend:
+    build:
+      context: ./fairpay-backend
+      dockerfile: Dockerfile
+    container_name: fairpay-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fairpay
+      SPRING_DATASOURCE_USERNAME: fairpay
+      SPRING_DATASOURCE_PASSWORD: fairpay123
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      # JWT propriedades (ajuste conforme sua configuração)
+      JWT_SECRET: YQXMKYRgH9EHaMFJzdEFODCtYGXNrw/TXkU6vDlxE8Vjt9BlLqJXy1HiO+WjAzAx4YfWQxZcw2pQGL9jVONX7Q==
+      JWT_EXPIRATION: 900000
+      JWT_REFRESH_EXPIRATION: 86400000
+    ports:
+      - "8090:8090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fairpay-network
+
+  # Frontend Next.js
+  frontend:
+    build:
+      context: ./frontend # ajuste o caminho se necessário
+      dockerfile: Dockerfile
+    container_name: fairpay-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8090/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - fairpay-network
+
+networks:
+  fairpay-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+```
+
+## Como usar a configuração Docker
+
+1. **Construir e iniciar os containers**:
+   ```bash
+   docker-compose up --build
+   ```
+
+2. **Apenas iniciar os serviços (após build)**:
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Parar os serviços**:
+   ```bash
+   docker-compose down
+   ```
+
+## Considerações importantes
+
+1. **Variáveis de ambiente**:
+   - Ajuste as variáveis no `docker-compose.yml` conforme sua configuração, especialmente as relacionadas à JWT.
+
+2. **CORS no backend**:
+   - Certifique-se que seu backend permite requisições do frontend, configurando CORS corretamente.
+
+3. **Volumes persistentes**:
+   - Os dados do PostgreSQL são persistidos através de um volume Docker.
+
+4. **Rede Docker**:
+   - Todos os serviços estão na mesma rede, facilitando a comunicação entre eles.
+
+Esta configuração completa permite que você rode toda a stack FairPay em containers Docker, tornando o ambiente consistente e fácil de configurar em diferentes máquinas.
+
+Código semelhante encontrado com 2 tipos de licença
