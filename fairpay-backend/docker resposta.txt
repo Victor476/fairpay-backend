@@ -1,0 +1,125 @@
+a2021064@19e003:~/Documentos/GitHub/Fairpay$ docker compose up
+WARN[0000] /home/alunos/a2021064/Documentos/GitHub/Fairpay/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+[+] Running 2/2
+ ✔ Container fairpay-backend   Created                                            0.0s 
+ ✔ Container fairpay-postgres  Recreated                                          0.1s 
+Attaching to fairpay-backend, fairpay-frontend, fairpay-postgres
+fairpay-postgres  | The files belonging to this database system will be owned by user "postgres".
+fairpay-postgres  | This user must also own the server process.
+fairpay-postgres  | 
+fairpay-postgres  | The database cluster will be initialized with locale "en_US.utf8".
+fairpay-postgres  | The default database encoding has accordingly been set to "UTF8".
+fairpay-postgres  | The default text search configuration will be set to "english".
+fairpay-postgres  | 
+fairpay-postgres  | Data page checksums are disabled.
+fairpay-postgres  | 
+fairpay-postgres  | fixing permissions on existing directory /var/lib/postgresql/data ... ok
+fairpay-postgres  | creating subdirectories ... ok
+fairpay-postgres  | selecting dynamic shared memory implementation ... posix
+fairpay-postgres  | selecting default max_connections ... 100
+fairpay-postgres  | selecting default shared_buffers ... 128MB
+fairpay-postgres  | selecting default time zone ... UTC
+fairpay-postgres  | creating configuration files ... ok
+fairpay-postgres  | running bootstrap script ... ok
+fairpay-postgres  | sh: locale: not found
+fairpay-postgres  | 2025-06-30 17:50:44.878 UTC [35] WARNING:  no usable system locales were found
+fairpay-postgres  | performing post-bootstrap initialization ... ok
+fairpay-postgres  | syncing data to disk ... ok
+fairpay-postgres  | 
+fairpay-postgres  | 
+fairpay-postgres  | Success. You can now start the database server using:
+fairpay-postgres  | 
+fairpay-postgres  |     pg_ctl -D /var/lib/postgresql/data -l logfile start
+fairpay-postgres  | 
+fairpay-postgres  | initdb: warning: enabling "trust" authentication for local connections
+fairpay-postgres  | initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+fairpay-postgres  | waiting for server to start....2025-06-30 17:50:46.035 UTC [41] LOG:  starting PostgreSQL 15.13 on x86_64-pc-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit
+fairpay-postgres  | 2025-06-30 17:50:46.044 UTC [41] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+fairpay-postgres  | 2025-06-30 17:50:46.060 UTC [44] LOG:  database system was shut down at 2025-06-30 17:50:45 UTC
+fairpay-postgres  | 2025-06-30 17:50:46.073 UTC [41] LOG:  database system is ready to accept connections
+fairpay-postgres  |  done
+fairpay-postgres  | server started
+fairpay-postgres  | CREATE DATABASE
+fairpay-postgres  | 
+fairpay-postgres  | 
+fairpay-postgres  | /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+fairpay-postgres  | 
+fairpay-postgres  | waiting for server to shut down....2025-06-30 17:50:46.263 UTC [41] LOG:  received fast shutdown request
+fairpay-postgres  | 2025-06-30 17:50:46.269 UTC [41] LOG:  aborting any active transactions
+fairpay-postgres  | 2025-06-30 17:50:46.274 UTC [41] LOG:  background worker "logical replication launcher" (PID 47) exited with exit code 1
+fairpay-postgres  | 2025-06-30 17:50:46.285 UTC [42] LOG:  shutting down
+fairpay-postgres  | 2025-06-30 17:50:46.288 UTC [42] LOG:  checkpoint starting: shutdown immediate
+fairpay-postgres  | 2025-06-30 17:50:46.370 UTC [42] LOG:  checkpoint complete: wrote 921 buffers (5.6%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.049 s, sync=0.023 s, total=0.086 s; sync files=301, longest=0.003 s, average=0.001 s; distance=4238 kB, estimate=4238 kB
+fairpay-postgres  | 2025-06-30 17:50:46.386 UTC [41] LOG:  database system is shut down
+fairpay-postgres  |  done
+fairpay-postgres  | server stopped
+fairpay-postgres  | 
+fairpay-postgres  | PostgreSQL init process complete; ready for start up.
+fairpay-postgres  | 
+fairpay-postgres  | 2025-06-30 17:50:46.515 UTC [1] LOG:  starting PostgreSQL 15.13 on x86_64-pc-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit
+fairpay-postgres  | 2025-06-30 17:50:46.515 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+fairpay-postgres  | 2025-06-30 17:50:46.515 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+fairpay-postgres  | 2025-06-30 17:50:46.520 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+fairpay-postgres  | 2025-06-30 17:50:46.531 UTC [57] LOG:  database system was shut down at 2025-06-30 17:50:46 UTC
+fairpay-postgres  | 2025-06-30 17:50:46.546 UTC [1] LOG:  database system is ready to accept connections
+fairpay-frontend  | 
+fairpay-frontend  | > fairpay-frontend@0.1.0 start
+fairpay-frontend  | > next start
+fairpay-frontend  | 
+fairpay-frontend  |    ▲ Next.js 15.3.0
+fairpay-frontend  |    - Local:        http://localhost:3000
+fairpay-frontend  |    - Network:      http://172.18.0.4:3000
+fairpay-frontend  | 
+fairpay-frontend  |  ✓ Starting...
+fairpay-backend   | 
+fairpay-backend   |   .   ____          _            __ _ _
+fairpay-backend   |  /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+fairpay-backend   | ( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+fairpay-backend   |  \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+fairpay-backend   |   '  |____| .__|_| |_|_| |_\__, | / / / /
+fairpay-backend   |  =========|_|==============|___/=/_/_/_/
+fairpay-backend   | 
+fairpay-backend   |  :: Spring Boot ::                (v3.4.4)
+fairpay-backend   | 
+fairpay-backend   | 2025-06-30T17:50:58.048Z  INFO 1 --- [fairpay] [           main] com.fairpay.FairpayBackendApplication    : Starting FairpayBackendApplication v0.0.1-SNAPSHOT using Java 21.0.7 with PID 1 (/app/app.jar started by root in /app)
+fairpay-backend   | 2025-06-30T17:50:58.056Z  INFO 1 --- [fairpay] [           main] com.fairpay.FairpayBackendApplication    : The following 1 profile is active: "prod"
+fairpay-frontend  |  ✓ Ready in 1453ms
+fairpay-backend   | 2025-06-30T17:51:00.308Z  INFO 1 --- [fairpay] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+fairpay-backend   | 2025-06-30T17:51:00.461Z  INFO 1 --- [fairpay] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 130 ms. Found 4 JPA repository interfaces.
+fairpay-backend   | 2025-06-30T17:51:01.888Z  INFO 1 --- [fairpay] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8090 (http)
+fairpay-backend   | 2025-06-30T17:51:01.929Z  INFO 1 --- [fairpay] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+fairpay-backend   | 2025-06-30T17:51:01.930Z  INFO 1 --- [fairpay] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.39]
+fairpay-backend   | 2025-06-30T17:51:02.004Z  INFO 1 --- [fairpay] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+fairpay-backend   | 2025-06-30T17:51:02.007Z  INFO 1 --- [fairpay] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 3764 ms
+fairpay-backend   | 2025-06-30T17:51:02.348Z  INFO 1 --- [fairpay] [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+fairpay-backend   | 2025-06-30T17:51:02.518Z  INFO 1 --- [fairpay] [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.6.11.Final
+fairpay-backend   | 2025-06-30T17:51:02.606Z  INFO 1 --- [fairpay] [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+fairpay-backend   | 2025-06-30T17:51:03.244Z  INFO 1 --- [fairpay] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+fairpay-backend   | 2025-06-30T17:51:03.339Z  INFO 1 --- [fairpay] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+fairpay-backend   | 2025-06-30T17:51:03.764Z  INFO 1 --- [fairpay] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@79604abe
+fairpay-backend   | 2025-06-30T17:51:03.767Z  INFO 1 --- [fairpay] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+fairpay-backend   | 2025-06-30T17:51:03.917Z  INFO 1 --- [fairpay] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+fairpay-backend   |     Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+fairpay-backend   |     Database driver: undefined/unknown
+fairpay-backend   |     Database version: 15.13
+fairpay-backend   |     Autocommit mode: undefined/unknown
+fairpay-backend   |     Isolation level: undefined/unknown
+fairpay-backend   |     Minimum pool size: undefined/unknown
+fairpay-backend   |     Maximum pool size: undefined/unknown
+fairpay-backend   | 2025-06-30T17:51:06.007Z  INFO 1 --- [fairpay] [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+fairpay-backend   | 2025-06-30T17:51:06.200Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Warning Code: 0, SQLState: 00000
+fairpay-backend   | 2025-06-30T17:51:06.201Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : constraint "uk8uxfq5yvprovl5it1atbp5j1y" of relation "group_invite_links" does not exist, skipping
+fairpay-backend   | 2025-06-30T17:51:06.217Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Warning Code: 0, SQLState: 00000
+fairpay-backend   | 2025-06-30T17:51:06.218Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : constraint "ukghpmfn23vmxfu3spu3lfg4r2d" of relation "refresh_tokens" does not exist, skipping
+fairpay-backend   | 2025-06-30T17:51:06.236Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Warning Code: 0, SQLState: 00000
+fairpay-backend   | 2025-06-30T17:51:06.236Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : constraint "uk7tdcd6ab5wsgoudnvj7xf1b7l" of relation "refresh_tokens" does not exist, skipping
+fairpay-backend   | 2025-06-30T17:51:06.250Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : SQL Warning Code: 0, SQLState: 00000
+fairpay-backend   | 2025-06-30T17:51:06.251Z  WARN 1 --- [fairpay] [           main] o.h.engine.jdbc.spi.SqlExceptionHelper   : constraint "uk6dotkott2kjsp8vw4d0m25fb7" of relation "users" does not exist, skipping
+fairpay-backend   | 2025-06-30T17:51:06.323Z  INFO 1 --- [fairpay] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+fairpay-backend   | 2025-06-30T17:51:07.229Z  INFO 1 --- [fairpay] [           main] eAuthenticationProviderManagerConfigurer : Global AuthenticationManager configured with AuthenticationProvider bean with name authenticationProvider
+fairpay-backend   | 2025-06-30T17:51:07.230Z  WARN 1 --- [fairpay] [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with an AuthenticationProvider bean. UserDetailsService beans will not be used by Spring Security for automatically configuring username/password login. Consider removing the AuthenticationProvider bean. Alternatively, consider using the UserDetailsService in a manually instantiated DaoAuthenticationProvider. If the current configuration is intentional, to turn off this warning, increase the logging level of 'org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer' to ERROR
+fairpay-backend   | 2025-06-30T17:51:07.313Z  INFO 1 --- [fairpay] [           main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+fairpay-backend   | 2025-06-30T17:51:08.447Z  WARN 1 --- [fairpay] [           main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+fairpay-backend   | 2025-06-30T17:51:09.840Z  INFO 1 --- [fairpay] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8090 (http) with context path '/'
+fairpay-backend   | 2025-06-30T17:51:09.863Z  INFO 1 --- [fairpay] [           main] com.fairpay.FairpayBackendApplication    : Started FairpayBackendApplication in 13.302 seconds (process running for 14.936)
+fairpay-backend   | ola mundo

@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"  # Mudando de 5432 para 5433 no host
     networks:
       - fairpay-network
     healthcheck:
@@ -24,7 +24,7 @@ services:
   # Backend Spring Boot
   backend:
     build:
-      context: ./fairpay-backend
+      context: ./fairpay-backend/fairpay-backend
       dockerfile: Dockerfile
     container_name: fairpay-backend
     environment:
