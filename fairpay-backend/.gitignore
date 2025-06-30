@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Vim/Vi ###
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
