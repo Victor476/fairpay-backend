@@ -2,6 +2,8 @@ package com.fairpay.model;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "groups") // "group" é palavra reservada em SQL, então usamos "groups"
@@ -23,6 +25,14 @@ public class Group {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_id", nullable = false)
     private User createdBy;
+
+    @ManyToMany
+    @JoinTable(
+        name = "group_members",
+        joinColumns = @JoinColumn(name = "group_id"),
+        inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private Set<User> members = new HashSet<>();
 
     public Group() {
         this.createdAt = Instant.now();
@@ -76,5 +86,21 @@ public class Group {
 
     public void setCreatedBy(User createdBy) {
         this.createdBy = createdBy;
+    }
+
+    public Set<User> getMembers() {
+        return members;
+    }
+
+    public void setMembers(Set<User> members) {
+        this.members = members;
+    }
+
+    public void addMember(User user) {
+        members.add(user);
+    }
+
+    public boolean isMember(User user) {
+        return members.contains(user);
     }
 }
