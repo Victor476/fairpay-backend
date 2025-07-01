@@ -46,6 +46,7 @@ CREATE TABLE expenses (
     category_id INTEGER REFERENCES categories(id),
     description TEXT NOT NULL,
     amount NUMERIC(12, 2) NOT NULL,
+    expense_date DATE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

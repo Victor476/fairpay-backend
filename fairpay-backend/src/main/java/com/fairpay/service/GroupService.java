@@ -2,7 +2,9 @@ package com.fairpay.service;
 
 import com.fairpay.dto.GroupRequestDTO;
 import com.fairpay.model.Group;
+import com.fairpay.model.GroupMember;
 import com.fairpay.model.User;
+import com.fairpay.repository.GroupMemberRepository;
 import com.fairpay.repository.GroupRepository;
 import com.fairpay.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -10,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class GroupService {
@@ -19,6 +23,9 @@ public class GroupService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private GroupMemberRepository groupMemberRepository;
 
     public Group createGroup(GroupRequestDTO groupRequestDTO, Long creatorUserId) {
         // Buscar usuário criador
@@ -38,6 +45,39 @@ public class GroupService {
         group.setCreatedBy(creator);
         group.setCreatedAt(Instant.now());
 
-        return groupRepository.save(group);
+        Group savedGroup = groupRepository.save(group);
+
+        // Automaticamente adicionar o criador como membro do grupo
+        GroupMember creatorMember = new GroupMember();
+        creatorMember.setUser(creator);
+        creatorMember.setGroup(savedGroup);
+        groupMemberRepository.save(creatorMember);
+
+        return savedGroup;
+    }    public List<Object> getGroupMembers(Long groupId, Long currentUserId) {
+        // Verificar se o usuário faz parte do grupo
+        if (!groupMemberRepository.existsByUserIdAndGroupId(currentUserId, groupId)) {
+            throw new IllegalArgumentException("Usuário não faz parte do grupo");
+        }
+        
+        // Buscar todos os membros do grupo
+        List<GroupMember> groupMembers = groupMemberRepository.findByGroupId(groupId);
+        
+        return groupMembers.stream()
+                .map(gm -> new Object() {
+                    public final Long id = gm.getUser().getId();
+                    public final String name = gm.getUser().getName();
+                    public final String email = gm.getUser().getEmail();
+                })
+                .collect(Collectors.toList());
+    }
+
+    public List<Group> getUserGroups(Long userId) {
+        // Buscar todos os grupos onde o usuário é membro
+        List<GroupMember> groupMembers = groupMemberRepository.findByUserId(userId);
+        
+        return groupMembers.stream()
+                .map(GroupMember::getGroup)
+                .collect(Collectors.toList());
     }
 }
