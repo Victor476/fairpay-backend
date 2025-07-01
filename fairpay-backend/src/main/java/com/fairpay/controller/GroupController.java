@@ -1,15 +1,21 @@
 package com.fairpay.controller;
 
+import com.fairpay.dto.GroupBalanceDTO;
 import com.fairpay.dto.GroupRequestDTO;
 import com.fairpay.dto.GroupResponseDTO;
 import com.fairpay.model.Group;
 import com.fairpay.security.AuthenticatedUser;
+import com.fairpay.service.GroupBalanceService;
 import com.fairpay.service.GroupService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-    
+
+import java.util.List;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/groups")
 public class GroupController {
@@ -17,18 +23,22 @@ public class GroupController {
     @Autowired
     private GroupService groupService;
 
-    @PostMapping
-    public ResponseEntity<?> createGroup(@RequestBody GroupRequestDTO groupRequestDTO) {
-        try {
-            Long authenticatedUserId = 1L; // ID simulado
+    @Autowired
+    private GroupBalanceService groupBalanceService;
 
-            Group createdGroup = groupService.createGroup(groupRequestDTO, authenticatedUserId);
+    @PostMapping
+    public ResponseEntity<?> createGroup(
+            @RequestBody GroupRequestDTO groupRequestDTO,
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        try {
+            Group createdGroup = groupService.createGroup(groupRequestDTO, user.getId());
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(createdGroup));
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Erro ao criar grupo.");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro ao criar grupo."));
         }
     }
 
@@ -44,5 +54,49 @@ public class GroupController {
                 public final String name = group.getCreatedBy().getName();
             };
         };
+    }
+
+    @GetMapping
+    public ResponseEntity<?> getUserGroups(@AuthenticationPrincipal AuthenticatedUser user) {
+        try {
+            var groups = groupService.getUserGroups(user.getId());
+            var responseDTOs = groups.stream()
+                    .map(this::toResponse)
+                    .toList();
+            return ResponseEntity.ok(responseDTOs);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro ao buscar grupos do usuário"));
+        }
+    }
+
+    @GetMapping("/{groupId}/members")
+    public ResponseEntity<?> getGroupMembers(
+            @PathVariable Long groupId,
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        try {
+            var members = groupService.getGroupMembers(groupId, user.getId());
+            return ResponseEntity.ok(members);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro ao buscar membros do grupo"));
+        }
+    }
+
+    @GetMapping("/{groupId}/balances")
+    public ResponseEntity<?> getGroupBalances(
+            @PathVariable Long groupId,
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        try {
+            List<GroupBalanceDTO> balances = groupBalanceService.calculateGroupBalances(groupId, user.getId());
+            return ResponseEntity.ok(balances);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Erro ao calcular saldos do grupo"));
+        }
     }
 }

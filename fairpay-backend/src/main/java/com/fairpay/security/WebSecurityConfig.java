@@ -58,9 +58,15 @@ public class WebSecurityConfig {
             .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> 
-                auth.requestMatchers("/api/auth/**").permitAll()
+                auth
+                    // Rotas específicas primeiro
+                    .requestMatchers("/api/auth/register").permitAll()
+                    .requestMatchers("/api/auth/login").permitAll()
+                    .requestMatchers("/api/auth/refresh-token").permitAll()
+                    // Depois padrões mais amplos
                     .requestMatchers("/api/public/**").permitAll()
-                    .requestMatchers("/error").permitAll() 
+                    .requestMatchers("/error").permitAll()
+                    // Por último, a regra default
                     .anyRequest().authenticated()
             );
         
