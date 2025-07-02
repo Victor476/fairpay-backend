@@ -51,6 +51,9 @@ public class GroupService {
         GroupMember creatorMember = new GroupMember();
         creatorMember.setUser(creator);
         creatorMember.setGroup(savedGroup);
+        creatorMember.setRole("admin"); // Criador do grupo é admin
+        creatorMember.setJoinedAt(Instant.now());
+        creatorMember.setIsActive(true);
         groupMemberRepository.save(creatorMember);
 
         return savedGroup;

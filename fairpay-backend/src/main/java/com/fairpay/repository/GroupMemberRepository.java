@@ -17,4 +17,8 @@ public interface GroupMemberRepository extends JpaRepository<GroupMember, Long> 
     List<GroupMember> findByGroupId(Long groupId);
     
     List<GroupMember> findByUserId(Long userId);
+    
+    // Verificar se usuário é admin de um grupo
+    @Query("SELECT COUNT(gm) > 0 FROM GroupMember gm WHERE gm.user.id = :userId AND gm.group.id = :groupId AND gm.role = :role")
+    boolean existsByUserIdAndGroupIdAndRole(@Param("userId") Long userId, @Param("groupId") Long groupId, @Param("role") String role);
 }

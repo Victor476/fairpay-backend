@@ -11,7 +11,9 @@ import com.fairpay.repository.ExpenseParticipantRepository;
 import com.fairpay.repository.GroupRepository;
 import com.fairpay.repository.GroupMemberRepository;
 import com.fairpay.repository.UserRepository;
+import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +41,9 @@ public class ExpenseService {
 
     @Autowired
     private UserRepository userRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Transactional
     public Expense createExpense(ExpenseRequestDTO dto, Long currentUserId) {
@@ -180,7 +185,8 @@ public class ExpenseService {
         ExpenseResponseDTO responseDTO = new ExpenseResponseDTO();
         responseDTO.setId(expense.getId());
         responseDTO.setDescription(expense.getDescription());
-        responseDTO.setAmount(expense.getAmount());
+        responseDTO.setAmount(expense.getAmount());  // Para compatibilidade
+        responseDTO.setTotalAmount(expense.getAmount());
         responseDTO.setExpenseDate(expense.getExpenseDate());
         responseDTO.setCreatedAt(expense.getCreatedAt());
         responseDTO.setCategoryId(expense.getCategoryId());
@@ -191,6 +197,13 @@ public class ExpenseService {
         paidByDto.setName(expense.getPaidByUser().getName());
         paidByDto.setEmail(expense.getPaidByUser().getEmail());
         responseDTO.setPaidBy(paidByDto);
+        
+        // Converter usuário que criou a despesa
+        ExpenseResponseDTO.PaidByUserDTO createdByDto = new ExpenseResponseDTO.PaidByUserDTO();
+        createdByDto.setId(expense.getCreatedBy().getId());
+        createdByDto.setName(expense.getCreatedBy().getName());
+        createdByDto.setEmail(expense.getCreatedBy().getEmail());
+        responseDTO.setCreatedBy(createdByDto);
         
         // Converter grupo
         ExpenseResponseDTO.GroupDTO groupDto = new ExpenseResponseDTO.GroupDTO();
@@ -213,5 +226,98 @@ public class ExpenseService {
         responseDTO.setParticipants(participantDtos);
         
         return responseDTO;
+    }
+    
+    @Transactional
+    public ExpenseResponseDTO updateExpense(Long expenseId, ExpenseRequestDTO dto, Long currentUserId) {
+        try {
+            // Buscar despesa existente
+            Expense expense = expenseRepository.findById(expenseId)
+                    .orElseThrow(() -> new EntityNotFoundException("Despesa não encontrada"));
+            
+            // Verificar se o usuário tem permissão para editar
+            if (!canUserModifyExpense(expense, currentUserId)) {
+                throw new IllegalArgumentException("Usuário não tem permissão para editar esta despesa");
+            }
+            
+            // Validar dados da requisição
+            validateExpenseRequest(dto);
+            
+            // Buscar e validar o novo pagador
+            User newPaidByUser = userRepository.findByEmail(dto.getPayer())
+                    .orElseThrow(() -> new EntityNotFoundException("Usuário pagador não encontrado"));
+            
+            // Verificar se o novo pagador faz parte do grupo
+            if (!isUserMemberOfGroup(newPaidByUser.getId(), expense.getGroup().getId())) {
+                throw new IllegalArgumentException("Usuário pagador não faz parte do grupo");
+            }
+            
+            // Validar se todos os novos participantes fazem parte do grupo
+            for (String participantEmail : dto.getParticipants()) {
+                User participant = userRepository.findByEmail(participantEmail)
+                        .orElseThrow(() -> new EntityNotFoundException("Participante não encontrado: " + participantEmail));
+                
+                if (!isUserMemberOfGroup(participant.getId(), expense.getGroup().getId())) {
+                    throw new IllegalArgumentException("Participante " + participantEmail + " não faz parte do grupo");
+                }
+            }
+            
+            // Remover participantes antigos
+            expenseParticipantRepository.deleteByExpenseId(expenseId);
+            entityManager.flush(); // Força a execução imediata da deleção
+            
+            // Atualizar dados da despesa
+            expense.setDescription(dto.getDescription());
+            expense.setAmount(dto.getTotalAmount());
+            expense.setExpenseDate(dto.getDate());
+            expense.setPaidByUser(newPaidByUser);
+            
+            if (dto.getCategoryId() != null) {
+                expense.setCategoryId(dto.getCategoryId());
+            }
+            
+            Expense updatedExpense = expenseRepository.save(expense);
+            
+            // Criar novos participantes da despesa
+            createExpenseParticipants(updatedExpense, dto.getParticipants(), dto.getTotalAmount());
+            
+            return convertToResponseDTO(updatedExpense);
+        } catch (Exception e) {
+            System.out.println("❌ ERRO no updateExpense: " + e.getClass().getSimpleName() + " - " + e.getMessage());
+            e.printStackTrace();
+            throw e;
+        }
+    }
+    
+    @Transactional
+    public void deleteExpense(Long expenseId, Long currentUserId) {
+        // Buscar despesa existente
+        Expense expense = expenseRepository.findById(expenseId)
+                .orElseThrow(() -> new EntityNotFoundException("Despesa não encontrada"));
+        
+        // Verificar se o usuário tem permissão para excluir
+        if (!canUserModifyExpense(expense, currentUserId)) {
+            throw new IllegalArgumentException("Usuário não tem permissão para excluir esta despesa");
+        }
+        
+        // Remover participantes da despesa
+        expenseParticipantRepository.deleteByExpenseId(expenseId);
+        
+        // Remover despesa
+        expenseRepository.delete(expense);
+    }
+    
+    private boolean canUserModifyExpense(Expense expense, Long currentUserId) {
+        // O criador da despesa pode sempre modificar
+        if (expense.getCreatedBy().getId().equals(currentUserId)) {
+            return true;
+        }
+        
+        // Administradores do grupo podem modificar
+        return isUserAdminOfGroup(currentUserId, expense.getGroup().getId());
+    }
+    
+    private boolean isUserAdminOfGroup(Long userId, Long groupId) {
+        return groupMemberRepository.existsByUserIdAndGroupIdAndRole(userId, groupId, "admin");
     }
 }

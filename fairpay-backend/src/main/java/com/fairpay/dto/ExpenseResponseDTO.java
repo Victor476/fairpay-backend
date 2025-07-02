@@ -16,12 +16,14 @@ public class ExpenseResponseDTO {
     
     private Long id;
     private String description;
-    private BigDecimal amount;
+    private BigDecimal amount;  // Mantendo compatibilidade
+    private BigDecimal totalAmount;
     private LocalDate expenseDate;
     private Instant createdAt;
     private Long categoryId;
     
     private PaidByUserDTO paidBy;
+    private PaidByUserDTO createdBy;  // Adicionar campo createdBy
     private GroupDTO group;
     private List<ParticipantDTO> participants;
     
