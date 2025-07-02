@@ -3,7 +3,6 @@ package com.fairpay.service;
 import com.fairpay.dto.GroupBalanceDTO;
 import com.fairpay.model.Expense;
 import com.fairpay.model.ExpenseParticipant;
-import com.fairpay.model.Group;
 import com.fairpay.model.User;
 import com.fairpay.repository.ExpenseParticipantRepository;
 import com.fairpay.repository.ExpenseRepository;
@@ -43,7 +42,7 @@ public class GroupBalanceService {
      */
     public List<GroupBalanceDTO> calculateGroupBalances(Long groupId, Long currentUserId) {
         // Verificar se o grupo existe
-        Group group = groupRepository.findById(groupId)
+        groupRepository.findById(groupId)
                 .orElseThrow(() -> new EntityNotFoundException("Grupo não encontrado"));
 
         // Verificar se o usuário atual é membro do grupo
