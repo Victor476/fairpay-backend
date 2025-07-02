@@ -26,9 +26,9 @@ $headers = @{
 try {
     $loginResponse = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method POST -Headers $headers -Body $loginData
     Write-Host "✅ Login realizado com sucesso!" -ForegroundColor Green
-    Write-Host "Token obtido: $($loginResponse.token.Substring(0,20))..." -ForegroundColor Gray
+    Write-Host "Token obtido: $($loginResponse.accessToken.Substring(0,20))..." -ForegroundColor Gray
     
-    $authToken = $loginResponse.token
+    $authToken = $loginResponse.accessToken
     $userId = $loginResponse.user.id
     
     $authHeaders = @{
@@ -56,7 +56,7 @@ try {
         $loginResponse = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method POST -Headers $headers -Body $loginData2
         Write-Host "✅ Login realizado com segundo usuário!" -ForegroundColor Green
         
-        $authToken = $loginResponse.token
+        $authToken = $loginResponse.accessToken
         $userId = $loginResponse.user.id
         
         $authHeaders = @{
@@ -85,7 +85,7 @@ try {
             } | ConvertTo-Json
             
             $loginResponse = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method POST -Headers $headers -Body $newLoginData
-            $authToken = $loginResponse.token
+            $authToken = $loginResponse.accessToken
             $userId = $loginResponse.user.id
             
             $authHeaders = @{

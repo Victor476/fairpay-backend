@@ -23,7 +23,7 @@ $headers = @{
 
 try {
     $loginResponse = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method POST -Headers $headers -Body $loginData
-    $authToken = $loginResponse.token
+    $authToken = $loginResponse.accessToken
     $userId = $loginResponse.user.id
     
     Write-Host "✅ Login realizado com sucesso!" -ForegroundColor Green
@@ -60,7 +60,7 @@ try {
         
         # Fazer login novamente
         $loginResponse = Invoke-RestMethod -Uri "$baseUrl/api/auth/login" -Method POST -Headers $headers -Body $loginData
-        $authToken = $loginResponse.token
+        $authToken = $loginResponse.accessToken
         $userId = $loginResponse.user.id
         
         $authHeaders = @{
