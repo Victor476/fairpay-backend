@@ -91,14 +91,16 @@ public class GroupBalanceService {
         List<GroupBalanceDTO> balances = new ArrayList<>();
         for (User member : groupMembers) {
             Long memberId = member.getId();
-            BigDecimal paid = totalPaid.get(memberId);
-            BigDecimal owed = totalOwed.get(memberId);
+            BigDecimal paid = totalPaid.getOrDefault(memberId, BigDecimal.ZERO);
+            BigDecimal owed = totalOwed.getOrDefault(memberId, BigDecimal.ZERO);
             BigDecimal balance = paid.subtract(owed); // positivo = tem a receber, negativo = deve
 
             balances.add(new GroupBalanceDTO(
                     memberId,
                     member.getName(),
-                    balance
+                    paid,     // totalPaid
+                    owed,     // totalOwed
+                    balance   // balance final
             ));
         }
 
