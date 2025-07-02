@@ -20,10 +20,10 @@ try {
     Write-Host "Resposta completa do login:" -ForegroundColor Gray
     $loginResponse | ConvertTo-Json -Depth 3
     
-    if ($loginResponse.accessToken) {
+    if ($loginResponse.token) {
         $authHeaders = @{
             "Content-Type" = "application/json"
-            "Authorization" = "Bearer $($loginResponse.accessToken)"
+            "Authorization" = "Bearer $($loginResponse.token)"
         }
         
         # 2. Testar endpoints existentes conhecidos
