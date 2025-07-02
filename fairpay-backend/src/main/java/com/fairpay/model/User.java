@@ -29,6 +29,12 @@ public class User {
     private String password;
 
     private LocalDateTime createdAt;
+    
+    private LocalDateTime lastLogin;
+    
+    private String phoneNumber;
+    
+    private String profileImageUrl;
 
     // Getters
 
@@ -51,6 +57,18 @@ public class User {
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
+    
+    public LocalDateTime getLastLogin() {
+        return lastLogin;
+    }
+    
+    public String getPhoneNumber() {
+        return phoneNumber;
+    }
+    
+    public String getProfileImageUrl() {
+        return profileImageUrl;
+    }
 
     // Setters
 
@@ -72,5 +90,17 @@ public class User {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+    
+    public void setLastLogin(LocalDateTime lastLogin) {
+        this.lastLogin = lastLogin;
+    }
+    
+    public void setPhoneNumber(String phoneNumber) {
+        this.phoneNumber = phoneNumber;
+    }
+    
+    public void setProfileImageUrl(String profileImageUrl) {
+        this.profileImageUrl = profileImageUrl;
     }
 }

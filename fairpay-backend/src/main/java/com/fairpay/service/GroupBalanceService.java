@@ -3,13 +3,10 @@ package com.fairpay.service;
 import com.fairpay.dto.GroupBalanceDTO;
 import com.fairpay.model.Expense;
 import com.fairpay.model.ExpenseParticipant;
-import com.fairpay.model.Group;
 import com.fairpay.model.User;
 import com.fairpay.repository.ExpenseParticipantRepository;
 import com.fairpay.repository.ExpenseRepository;
 import com.fairpay.repository.GroupMemberRepository;
-import com.fairpay.repository.GroupRepository;
-import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -21,9 +18,6 @@ import java.util.Map;
 
 @Service
 public class GroupBalanceService {
-
-    @Autowired
-    private GroupRepository groupRepository;
 
     @Autowired
     private GroupMemberRepository groupMemberRepository;
@@ -42,13 +36,9 @@ public class GroupBalanceService {
      * @return Lista com os saldos de cada membro
      */
     public List<GroupBalanceDTO> calculateGroupBalances(Long groupId, Long currentUserId) {
-        // Verificar se o grupo existe
-        Group group = groupRepository.findById(groupId)
-                .orElseThrow(() -> new EntityNotFoundException("Grupo não encontrado"));
-
-        // Verificar se o usuário atual é membro do grupo
+        // Verificar se o usuário atual é membro do grupo (isso também valida se o grupo existe)
         if (!groupMemberRepository.existsByUserIdAndGroupId(currentUserId, groupId)) {
-            throw new IllegalArgumentException("Usuário não faz parte do grupo");
+            throw new IllegalArgumentException("Usuário não faz parte do grupo ou grupo não existe");
         }
 
         // Buscar todos os membros do grupo
@@ -61,7 +51,7 @@ public class GroupBalanceService {
         List<Expense> groupExpenses = expenseRepository.findByGroupId(groupId);
 
         // Buscar todas as participações nas despesas do grupo
-        List<ExpenseParticipant> allParticipations = expenseParticipantRepository.findByGroupId(groupId);
+        List<ExpenseParticipant> allParticipations = expenseParticipantRepository.findByExpenseGroupId(groupId);
 
         // Calcular saldos
         Map<Long, BigDecimal> totalPaid = new HashMap<>(); // Quanto cada pessoa pagou

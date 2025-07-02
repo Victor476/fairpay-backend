@@ -24,5 +24,5 @@ public interface ExpenseParticipantRepository extends JpaRepository<ExpenseParti
     
     // Buscar todas as participações em despesas de um grupo
     @Query("SELECT ep FROM ExpenseParticipant ep WHERE ep.expense.group.id = :groupId")
-    List<ExpenseParticipant> findByGroupId(@Param("groupId") Long groupId);
+    List<ExpenseParticipant> findByExpenseGroupId(@Param("groupId") Long groupId);
 }

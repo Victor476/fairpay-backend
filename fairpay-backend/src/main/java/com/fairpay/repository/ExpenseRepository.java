@@ -21,4 +21,8 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     // Buscar todas as despesas pagas por um usuário em um grupo específico
     @Query("SELECT e FROM Expense e WHERE e.group.id = :groupId AND e.paidByUser.id = :userId")
     List<Expense> findByGroupIdAndPaidByUserId(@Param("groupId") Long groupId, @Param("userId") Long userId);
+    
+    // Contar despesas de um grupo
+    @Query("SELECT COUNT(e) FROM Expense e WHERE e.group.id = :groupId")
+    long countByGroupId(@Param("groupId") Long groupId);
 }
