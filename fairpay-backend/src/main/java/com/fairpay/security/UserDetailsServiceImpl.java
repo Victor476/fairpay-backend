@@ -26,6 +26,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
         return new AuthenticatedUser(
                 user.getId(),
                 user.getEmail(),
+                user.getName(),
                 user.getPassword(),
                 new ArrayList<>() // Roles podem ser adicionadas aqui se necessário
         );

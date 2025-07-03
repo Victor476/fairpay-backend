@@ -31,8 +31,14 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         try {
             String jwt = parseJwt(request);
+            logger.info("=== AuthTokenFilter ===");
+            logger.info("URI: {} | Method: {}", request.getRequestURI(), request.getMethod());
+            logger.info("Authorization Header: {}", request.getHeader("Authorization"));
+            logger.info("JWT extraído: {}", jwt != null ? jwt.substring(0, Math.min(jwt.length(), 20)) + "..." : "null");
+            
             if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
                 String username = jwtUtils.getUserNameFromJwtToken(jwt);
+                logger.info("Username extraído do JWT: {}", username);
 
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                 UsernamePasswordAuthenticationToken authentication = 
@@ -44,9 +50,16 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+                logger.info("Usuário autenticado com sucesso: {}", username);
+            } else {
+                if (jwt != null) {
+                    logger.warn("Token JWT inválido");
+                } else {
+                    logger.info("Nenhum token JWT fornecido");
+                }
             }
         } catch (Exception e) {
-            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage());
+            logger.error("Não foi possível autenticar o usuário: {}", e.getMessage(), e);
         }
 
         filterChain.doFilter(request, response);

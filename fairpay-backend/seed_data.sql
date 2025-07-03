@@ -17,7 +17,7 @@
 -- USUÁRIOS DE TESTE
 -- ================================================================
 
--- Inserir usuários (senhas são 'password123' com hash bcrypt)
+-- Inserir usuários (senhas são 'senha123' com hash bcrypt)
 INSERT INTO users (name, email, password_hash, phone, email_verified, is_active) VALUES
 ('João Silva', 'joao@teste.com', '$2a$10$N.zmdr9k7uOCQb376NoUnuTUW8u6rjBbsttMwi5HdoW.bJYYYQh9y', '(11) 99999-1111', true, true),
 ('Maria Santos', 'maria@teste.com', '$2a$10$N.zmdr9k7uOCQb376NoUnuTUW8u6rjBbsttMwi5HdoW.bJYYYQh9y', '(11) 99999-2222', true, true),
